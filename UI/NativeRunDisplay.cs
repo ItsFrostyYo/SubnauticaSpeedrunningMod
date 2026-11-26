@@ -33,6 +33,7 @@ namespace ItsFrosti.SpeedrunningMod.Ui
         private static Color _textColor = Color.white;
         private static float _nextTemplateRefreshAt;
         private static GUIStyle _topRightStyle;
+        private static GUIStyle _timerOutlineStyle;
         private static GUIStyle _runTitleStyle;
         private static GUIStyle _runSubtitleStyle;
         private static GUIStyle _runComparisonStyle;
@@ -133,6 +134,7 @@ namespace ItsFrosti.SpeedrunningMod.Ui
             _textColor = template.color;
             _textColor.a = 1f; // A HUD fade must not fade the persistent race overlay.
             _topRightStyle = null;
+            _timerOutlineStyle = null;
             _runTitleStyle = null;
             _runSubtitleStyle = null;
             _runComparisonStyle = null;
@@ -178,14 +180,16 @@ namespace ItsFrosti.SpeedrunningMod.Ui
             GUIStyle style = GetTopRightStyle(fontSize, color);
 
             Vector2 size = style.CalcSize(new GUIContent(text));
-            Rect rect = new Rect(Screen.width - size.x - 4f, top, size.x + 2f, size.y + 4f);
-            Color foreground = style.normal.textColor;
-            style.normal.textColor = new Color(0f, 0f, 0f, 0.8f);
-            for (int x = -1; x <= 1; x++)
-                for (int y = -1; y <= 1; y++)
+            Rect rect = new Rect(Screen.width - size.x - 14f, top, size.x + 2f, size.y + 4f);
+            if (_timerOutlineStyle == null)
+            {
+                _timerOutlineStyle = new GUIStyle(style);
+                _timerOutlineStyle.normal.textColor = Color.black;
+            }
+            for (int x = -2; x <= 2; x++)
+                for (int y = -2; y <= 2; y++)
                     if (x != 0 || y != 0)
-                        GUI.Label(new Rect(rect.x + x, rect.y + y, rect.width, rect.height), text, style);
-            style.normal.textColor = foreground;
+                        GUI.Label(new Rect(rect.x + x, rect.y + y, rect.width, rect.height), text, _timerOutlineStyle);
             GUI.Label(rect, text, style);
         }
 

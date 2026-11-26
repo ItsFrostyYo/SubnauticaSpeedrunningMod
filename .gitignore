@@ -6,3 +6,5 @@ bin/
 .vscode/*
 !.vscode/settings.json
 !.vscode/tasks.json
+Other/
+Race/Timing/README.md

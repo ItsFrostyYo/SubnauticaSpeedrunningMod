@@ -26,6 +26,19 @@ namespace ItsFrosti.SpeedrunningMod.RunTracking
 
         private static bool _installed;
         private static ModGameStateKind _state = ModGameStateKind.Booting;
+        private static readonly RunClock Clock = new RunClock();
+        internal static bool IsTimerRunning { get { return _timerRunning && !_timerCompleted; } }
+        internal static void SetPortalLoadRemoval(bool removing) { Clock.SetRemoving(removing && IsTimerRunning); }
+        private static void ReadClock() { Clock.Read(out _elapsedSeconds, out _realTimeElapsedSeconds); }
+        private static void StartTimer() { Clock.Start(); _timerRunning = true; ReadClock(); }
+        private static void StopTimer() { Clock.Stop(); _timerRunning = false; ReadClock(); }
+        private static void ResetClock()
+        {
+            PortalLoadRuntime.Reset();
+            Clock.Reset();
+            _elapsedSeconds = _realTimeElapsedSeconds = 0d;
+        }
+
         private static bool _portalLoading;
         private static bool _deathLoading;
         private static bool _playerDiedThisFrame;
@@ -39,7 +52,6 @@ namespace ItsFrosti.SpeedrunningMod.RunTracking
         private static bool _lastLaunchStarted;
         private static double _elapsedSeconds;
         private static double _realTimeElapsedSeconds;
-        private static int _portalLoadCount;
         private static ModGameplaySnapshot _lastSnapshot;
         private static bool _haveLoggedSnapshot;
         private static float _lastCureStartTime;
@@ -107,16 +119,14 @@ namespace ItsFrosti.SpeedrunningMod.RunTracking
 
         private static void OnPortalLoadingStarted()
         {
-            if (!_portalLoading)
-            {
-                _portalLoading = true;
-                _portalLoadCount++;
-                Plugin.Logger.Info("Detected precursor portal loading start.");
-            }
+            _portalLoading = true;
+            PortalLoadRuntime.BeginPortal();
+            Plugin.Logger.Info("Detected precursor portal loading start.");
         }
 
         private static void OnPortalLoadingEnded()
         {
+            PortalLoadRuntime.Reset();
             if (_portalLoading)
             {
                 _portalLoading = false;
@@ -127,13 +137,14 @@ namespace ItsFrosti.SpeedrunningMod.RunTracking
         internal static void Update()
         {
             UpdateSaveContext();
+            PortalLoadRuntime.Refresh();
             ModSeedRuntimeHost.EnsureStartupHooksInstalled();
             bool rankedPracticeActive = ModSeedRuntimeHost.IsRankedSingleplayerSeedActive();
             bool rankedMultiplayerActive = ModSeedRuntimeHost.IsRankedMultiplayerSeedActive();
             bool rankedRunActive = rankedPracticeActive || rankedMultiplayerActive;
-            bool betterRngTimedActive = IsBetterRngTimedRunActive();
             UpdateDeathLoadingState();
             UpdateGameplayState();
+            bool betterRngTimedActive = IsBetterRngTimedRunActive();
             ModSeedRuntimeHost.UpdateSharedRuleState(
                 _currentSaveSlot,
                 _state == ModGameStateKind.MainMenu,
@@ -173,6 +184,7 @@ namespace ItsFrosti.SpeedrunningMod.RunTracking
             }
 
             UpdateTimerLifecycle();
+            ReadClock();
             if (rankedRunActive)
             {
                 UpdateRunProgress();
@@ -192,6 +204,12 @@ namespace ItsFrosti.SpeedrunningMod.RunTracking
         {
             string saveSlot = Utils.GetSavegameDir() ?? string.Empty;
             string gameModeName = Player.main != null ? Utils.GetLegacyGameMode().ToString() : string.Empty;
+            if (!string.Equals(_currentSaveSlot, saveSlot, StringComparison.Ordinal))
+            {
+                ResetClock();
+                _timerRunning = _timerCompleted = _timerArmed = _survivalIntroObserved = false;
+                _portalLoading = false;
+            }
 
             if (!string.Equals(_currentSaveSlot, saveSlot, StringComparison.Ordinal) ||
                 !string.Equals(_currentGameModeName, gameModeName, StringComparison.Ordinal))
@@ -341,27 +359,16 @@ namespace ItsFrosti.SpeedrunningMod.RunTracking
                 !_timerCompleted)
             {
                 _timerCompleted = true;
-                _timerRunning = false;
+                StopTimer();
                 Plugin.Logger.Info("Speedrun timer completed because the opponent won the private race at " + FormatTimer(_elapsedSeconds) + ".");
             }
 
-            if (_timerRunning && !_timerCompleted)
-            {
-                _realTimeElapsedSeconds += Time.unscaledDeltaTime;
-
-                bool shouldPauseDisplayedTimer = betterRngTimedRun
-                    ? (_portalLoading && _portalLoadCount > 1)
-                    : _portalLoading;
-                if (!shouldPauseDisplayedTimer)
-                {
-                    _elapsedSeconds += Time.unscaledDeltaTime;
-                }
-            }
+            ReadClock();
 
             if (LaunchRocket.isLaunching && !_lastLaunchStarted && _timerRunning && !_timerCompleted)
             {
                 _timerCompleted = true;
-                _timerRunning = false;
+                StopTimer();
                 Plugin.Logger.Info("Speedrun timer completed on rocket launch at " + FormatTimer(_elapsedSeconds) + ".");
 
                 if (betterRngTimedRun)
@@ -395,8 +402,7 @@ namespace ItsFrosti.SpeedrunningMod.RunTracking
                         }
 
                         _timerArmed = false;
-                        _elapsedSeconds = 0d;
-                        _realTimeElapsedSeconds = 0d;
+                        ResetClock();
                     }
 
                     break;
@@ -416,8 +422,7 @@ namespace ItsFrosti.SpeedrunningMod.RunTracking
             else if (!_timerRunning)
             {
                 _timerArmed = false;
-                _elapsedSeconds = 0d;
-                _realTimeElapsedSeconds = 0d;
+                ResetClock();
             }
 
             if (_timerArmed && !_timerRunning)
@@ -425,7 +430,7 @@ namespace ItsFrosti.SpeedrunningMod.RunTracking
                 string startReason;
                 if (TryGetCreativeTimerStartReason(out startReason))
                 {
-                    _timerRunning = true;
+                    StartTimer();
                     _verificationVisible = false;
                     Plugin.Logger.Info("Speedrun timer started due to " + startReason + ".");
                 }
@@ -440,8 +445,7 @@ namespace ItsFrosti.SpeedrunningMod.RunTracking
                 {
                     _timerArmed = false;
                     _survivalIntroObserved = false;
-                    _elapsedSeconds = 0d;
-                    _realTimeElapsedSeconds = 0d;
+                    ResetClock();
                 }
 
                 return;
@@ -465,7 +469,7 @@ namespace ItsFrosti.SpeedrunningMod.RunTracking
                 Player.main != null &&
                 !Player.main.cinematicModeActive)
             {
-                _timerRunning = true;
+                StartTimer();
                 _verificationVisible = false;
                 Plugin.Logger.Info("Speedrun timer started due to intro cutscene ending and player control being restored.");
             }
@@ -932,54 +936,21 @@ namespace ItsFrosti.SpeedrunningMod.RunTracking
 
         private static ModSingleplayerRunMode ResolveCurrentRunMode()
         {
-            bool rankedPracticeActive = ModSeedRuntimeHost.IsRankedSingleplayerSeedActive();
-            bool rankedMultiplayerActive = ModSeedRuntimeHost.IsRankedMultiplayerSeedActive();
-            bool betterRngTimedActive = IsBetterRngTimedRunActive();
-            if (!rankedPracticeActive && !rankedMultiplayerActive && !betterRngTimedActive)
-            {
-                return ModSingleplayerRunMode.None;
-            }
-
             if (_state == ModGameStateKind.MainMenu || _state == ModGameStateKind.Booting)
-            {
                 return ModSingleplayerRunMode.None;
-            }
-
-            if (Utils.GetContinueMode())
-            {
-                return ModSingleplayerRunMode.None;
-            }
-
-            GameMode mode = Utils.GetLegacyGameMode();
-            switch (mode)
-            {
-                case GameMode.Creative:
-                    return (rankedPracticeActive || rankedMultiplayerActive)
-                        ? ModSingleplayerRunMode.Creative
-                        : ModSingleplayerRunMode.None;
-                case GameMode.Survival:
-                    return ModSingleplayerRunMode.Survival;
-                case GameMode.Hardcore:
-                    return ModSingleplayerRunMode.Hardcore;
-                default:
-                    return ModSingleplayerRunMode.None;
-            }
+            return RunTimingEligibility.Resolve(
+                Utils.GetLegacyGameMode(),
+                ModSeedRuntimeHost.IsRankedSingleplayerSeedActive() || ModSeedRuntimeHost.IsRankedMultiplayerSeedActive(),
+                ModClientSessionMode.IsBetterRngSingleplayerSelected,
+                Utils.GetContinueMode());
         }
 
         private static bool IsBetterRngTimedRunActive()
         {
-            if (!ModClientSessionMode.IsBetterRngSingleplayerSelected)
-            {
-                return false;
-            }
-
             if (_state == ModGameStateKind.Booting || _state == ModGameStateKind.MainMenu)
-            {
                 return false;
-            }
-
-            GameMode mode = Utils.GetLegacyGameMode();
-            return mode == GameMode.Survival || mode == GameMode.Hardcore;
+            return RunTimingEligibility.Resolve(Utils.GetLegacyGameMode(), false,
+                ModClientSessionMode.IsBetterRngSingleplayerSelected, Utils.GetContinueMode()) != ModSingleplayerRunMode.None;
         }
 
         private static string GetRunModeLabel()
@@ -1199,7 +1170,6 @@ namespace ItsFrosti.SpeedrunningMod.RunTracking
         private static void ResetTimerSession()
         {
             _portalLoading = false;
-            _portalLoadCount = 0;
             _deathLoading = false;
             _lastAliveBiomeName = string.Empty;
             _lastAlivePosition = Vector3.zero;
@@ -1208,8 +1178,7 @@ namespace ItsFrosti.SpeedrunningMod.RunTracking
             _timerRunning = false;
             _timerCompleted = false;
             _lastLaunchStarted = false;
-            _elapsedSeconds = 0d;
-            _realTimeElapsedSeconds = 0d;
+            ResetClock();
             _lastCureStartTime = 0f;
             _currentSaveSlot = string.Empty;
             _currentGameModeName = string.Empty;
@@ -1243,14 +1212,6 @@ namespace ItsFrosti.SpeedrunningMod.RunTracking
             InGame,
             PortalLoading,
             DeathLoading
-        }
-
-        private enum ModSingleplayerRunMode
-        {
-            None,
-            Creative,
-            Survival,
-            Hardcore
         }
 
         private struct ModGameplaySnapshot : IEquatable<ModGameplaySnapshot>
