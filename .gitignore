@@ -1,0 +1,8 @@
+obj/
+bin/
+**/obj/
+**/bin/
+*.log
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json

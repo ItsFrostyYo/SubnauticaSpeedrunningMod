@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net35</TargetFramework>
+    <AssemblyName>SubnauticaSpeedrunningMod</AssemblyName>
+    <RootNamespace>ItsFrosti.SpeedrunningMod</RootNamespace>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <LangVersion>7.3</LangVersion>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <OutputPath>dist/</OutputPath>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+    <!-- This plugin deliberately targets the September 2018 legacy game-mode API. -->
+    <NoWarn>$(NoWarn);0618</NoWarn>
+    <GameRoot Condition="'$(GameRoot)' == ''">C:\Program Files (x86)\Steam\steamapps\common\Subnautica2018</GameRoot>
+    <GameManaged>$(GameRoot)/Subnautica_Data/Managed</GameManaged>
+    <LoaderDirectory Condition="'$(LoaderDirectory)' == '' and Exists('$(MSBuildThisFileDirectory)../SNSRModLoader/artifacts/package/Mods/Loader/SNSRModLoader.dll')">$(MSBuildThisFileDirectory)../SNSRModLoader/artifacts/package/Mods/Loader</LoaderDirectory>
+    <LoaderDirectory Condition="'$(LoaderDirectory)' == ''">$(GameRoot)/Mods/Loader</LoaderDirectory>
+  </PropertyGroup>
+  <Target Name="CheckGameReferences" BeforeTargets="ResolveAssemblyReferences">
+    <Error Condition="!Exists('$(GameManaged)/Assembly-CSharp.dll')" Text="September 2018 game assemblies not found. Set GameRoot to your Subnautica2018 installation." />
+    <Error Condition="!Exists('$(LoaderDirectory)/SNSRModLoader.dll')" Text="SNSRModLoader SDK not found. Build the neighboring loader project, install the loader in the game, or set LoaderDirectory." />
+  </Target>
+  <ItemGroup>
+    <Compile Include="Plugin/**/*.cs" />
+    <Compile Include="BetterRNG/**/*.cs" />
+    <Compile Include="Network/**/*.cs" />
+    <Compile Include="Race/**/*.cs" />
+    <Compile Include="Set Seed/**/*.cs" />
+    <Compile Include="UI/**/*.cs" />
+    <EmbeddedResource Include="Set Seed/Seeds/Survival.csv" LogicalName="RaceSeeds.csv" />
+    <EmbeddedResource Include="Set Seed/Seeds/Creative.csv" LogicalName="CreativeRaceSeeds.csv" />
+    <EmbeddedResource Include="Set Seed/Seeds/Hardcore.csv" LogicalName="HardcoreRaceSeeds.csv" />
+    <Reference Include="SNSRModLoader"><HintPath>$(LoaderDirectory)/SNSRModLoader.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="0Harmony"><HintPath>$(LoaderDirectory)/0Harmony.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine"><HintPath>$(GameManaged)/UnityEngine.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.UI"><HintPath>$(GameManaged)/UnityEngine.UI.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Assembly-CSharp"><HintPath>$(GameManaged)/Assembly-CSharp.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Assembly-CSharp-firstpass"><HintPath>$(GameManaged)/Assembly-CSharp-firstpass.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="LitJson"><HintPath>$(GameManaged)/LitJson.dll</HintPath><Private>false</Private></Reference>
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+  </ItemGroup>
+</Project>
