@@ -20,19 +20,16 @@ namespace ItsFrosti.SpeedrunningMod.Ui
         private const string ModQueueGroupName = "ModQueue";
         private const string ModMatchmakingGroupName = "ModMatchmaking";
         private const string ModPracticeNewGameGroupName = "ModPracticeNewGame";
-        private const string BetterRngSavedGamesButtonLabel = "Start a New BetterRNG Save";
+        private const string BetterRngSavedGamesButtonLabel = "Start a new BetterRNG game";
         private const string RaceButtonLabel = "Race";
         private const string QueueRandomRaceComingSoonLabel = "Queue Random Race (Coming Soon)";
         private const string HostRaceLabel = "Host Race";
         private const string JoinRaceLabel = "Join Race";
-        private const string SingleplayerRacePracticeLabel = "Singleplayer Race Practice";
+        private const string SingleplayerRacePracticeLabel = "Start a new Singleplayer Race";
         private const string MatchmakingPlaceholderObjectName = "ModMatchmakingPlaceholder";
         private const string UpdatePanelTitleText = "Update " + Plugin.PluginVersion;
         private const int PanelTitleFontSize = 17;
         private const int DisabledQueueButtonFontSize = 19;
-        private const int PracticeNewGameButtonFontSize = 34;
-        private const int PracticeNewGameDisabledButtonFontSize = 24;
-        private const int BetterRngSavedGamesButtonFontSize = 22;
         private const float ComingSoonRowAlpha = 0.42f;
         private static float _nextMenuPatchAttemptAt;
         private static GameObject _privateRaceConnectingModalRoot;
@@ -311,28 +308,7 @@ namespace ItsFrosti.SpeedrunningMod.Ui
             ConfigureRankedMatchmakingGroup(matchmakingGroup);
         }
 
-        private static void EnsureRankedPracticeNewGameGroup(MainMenuRightSide rightSide)
-        {
-            GameObject practiceGroup = FindGroup(rightSide, ModPracticeNewGameGroupName);
-            if (practiceGroup == null)
-            {
-                GameObject savedGamesGroup = FindGroup(rightSide, "SavedGames");
-                if (savedGamesGroup == null)
-                {
-                    Plugin.Logger.Warning("Ranked UI could not find SavedGames group to clone for Ranked Singleplayer Practice.");
-                    return;
-                }
 
-                practiceGroup = UnityEngine.Object.Instantiate(savedGamesGroup, savedGamesGroup.transform.parent, false);
-                practiceGroup.name = ModPracticeNewGameGroupName;
-                practiceGroup.transform.SetSiblingIndex(savedGamesGroup.transform.GetSiblingIndex() + 1);
-                practiceGroup.SetActive(false);
-                rightSide.groups.Add(practiceGroup);
-            }
-
-            DisableSavedGameBehaviors(practiceGroup);
-            ConfigureRankedPracticeNewGameGroup(practiceGroup);
-        }
 
         private static void ConfigureRankedModeSelectGroup(GameObject modeSelectGroup)
         {
@@ -350,6 +326,7 @@ namespace ItsFrosti.SpeedrunningMod.Ui
                 return;
             }
 
+            int nativeFontSize = template.GetComponentInChildren<Text>(true).fontSize;
             DestroySiblingRows(content, template);
 
             template.gameObject.SetActive(true);
@@ -359,7 +336,7 @@ namespace ItsFrosti.SpeedrunningMod.Ui
                 template.gameObject,
                 QueueRandomRaceComingSoonLabel,
                 false,
-                26,
+                nativeFontSize,
                 null);
 
             GameObject hostRow = UnityEngine.Object.Instantiate(template.gameObject, content, false);
@@ -369,7 +346,7 @@ namespace ItsFrosti.SpeedrunningMod.Ui
                 hostRow,
                 HostRaceLabel,
                 true,
-                26,
+                nativeFontSize,
                 delegate
                 {
                     PromptAndBeginPrivateRaceHost();
@@ -382,7 +359,7 @@ namespace ItsFrosti.SpeedrunningMod.Ui
                 joinRow,
                 JoinRaceLabel,
                 true,
-                26,
+                nativeFontSize,
                 delegate
                 {
                     PromptAndBeginPrivateRaceJoin();
@@ -395,14 +372,14 @@ namespace ItsFrosti.SpeedrunningMod.Ui
                 practiceRow,
                 SingleplayerRacePracticeLabel,
                 true,
-                26,
+                nativeFontSize,
                 delegate
                 {
                     ModClientSessionMode.SelectRankedSingleplayerPractice();
                     OpenRankedPracticeNewGame(uGUI_MainMenu.main, MainMenuRightSide.main, FindPrimaryButton("ButtonRanked"));
                 });
 
-            SetPanelTitle(modeSelectGroup, "Choose Mode");
+            SetNativePanelTitle(modeSelectGroup, "Choose Mode");
         }
 
         private static void ConfigureRankedQueueGroup(GameObject modGroup)
@@ -492,68 +469,7 @@ namespace ItsFrosti.SpeedrunningMod.Ui
             SetPanelTitle(matchmakingGroup, ModRankedMatchmakingRuntimeHost.GetPanelTitle());
         }
 
-        private static void ConfigureRankedPracticeNewGameGroup(GameObject practiceGroup)
-        {
-            if (practiceGroup == null)
-            {
-                return;
-            }
 
-            Transform content = practiceGroup.transform.Find("Scroll View/Viewport/SavedGameAreaContent");
-            if (content == null)
-            {
-                Plugin.Logger.Warning("Ranked UI could not find SavedGameAreaContent in Ranked Singleplayer Practice panel.");
-                return;
-            }
-
-            Transform template = content.Find("NewGame");
-            if (template == null)
-            {
-                Plugin.Logger.Warning("Ranked UI could not find NewGame template row in Ranked Singleplayer Practice panel.");
-                return;
-            }
-
-            DestroySiblingRows(content, template);
-
-            template.gameObject.SetActive(true);
-            template.name = "NewGame";
-            template.SetSiblingIndex(0);
-            ConfigureActionRow(
-                template.gameObject,
-                "Survival",
-                true,
-                PracticeNewGameButtonFontSize,
-                delegate
-                {
-                    StartRankedPracticeNewGame(GameMode.Survival);
-                });
-
-            GameObject creativeRow = UnityEngine.Object.Instantiate(template.gameObject, content, false);
-            creativeRow.name = "NewGame";
-            creativeRow.transform.SetSiblingIndex(1);
-            ConfigureActionRow(
-                creativeRow,
-                Ruleset8SeedPool.HasSeeds(GameMode.Creative) ? "Creative" : "Creative (Coming Soon)",
-                Ruleset8SeedPool.HasSeeds(GameMode.Creative),
-                Ruleset8SeedPool.HasSeeds(GameMode.Creative) ? PracticeNewGameButtonFontSize : PracticeNewGameDisabledButtonFontSize,
-                delegate
-                {
-                    StartRankedPracticeNewGame(GameMode.Creative);
-                });
-
-            GameObject hardcoreRow = UnityEngine.Object.Instantiate(template.gameObject, content, false);
-            hardcoreRow.name = "NewGame";
-            hardcoreRow.transform.SetSiblingIndex(2);
-            ConfigureActionRow(
-                hardcoreRow,
-                Ruleset8SeedPool.HasSeeds(GameMode.Hardcore) ? "Hardcore" : "Hardcore (Coming Soon)",
-                Ruleset8SeedPool.HasSeeds(GameMode.Hardcore),
-                PracticeNewGameDisabledButtonFontSize,
-                delegate { StartRankedPracticeNewGame(GameMode.Hardcore); });
-
-            SetPanelTitle(practiceGroup, "New Game");
-            Plugin.Logger.Info("Configured Singleplayer Race Practice buttons for Survival and Creative.");
-        }
 
         private static void ConfigureQueueRow(GameObject row, QueueRowDefinition definition)
         {
@@ -665,7 +581,7 @@ namespace ItsFrosti.SpeedrunningMod.Ui
             betterRngRow.name = "NewGame";
             betterRngRow.transform.SetSiblingIndex(Mathf.Min(1, content.childCount - 1));
             SetButtonLabel(betterRngRow, BetterRngSavedGamesButtonLabel);
-            SetButtonLabelFontSize(betterRngRow, BetterRngSavedGamesButtonFontSize);
+            SetButtonLabelFontSize(betterRngRow, template.GetComponentInChildren<Text>(true).fontSize);
             SetAlpha(betterRngRow, 1f);
             ResetMainMenuButtonVisualState(betterRngRow);
 

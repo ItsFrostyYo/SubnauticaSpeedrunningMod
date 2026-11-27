@@ -191,6 +191,9 @@ namespace ItsFrosti.SpeedrunningMod.RunTracking
             }
 
             ModOverlayRuntime.SetTimer(FormatTimer(_elapsedSeconds), ShouldShowTimerUi());
+            ModOverlayRuntime.SetCategoryLabel(RunTimingEligibility.CategoryLabel(_activeRunMode,
+                ModClientSessionMode.IsBetterRngSingleplayerSelected,
+                ModClientSessionMode.IsRankedSingleplayerPracticeSelected));
             ModOverlayRuntime.SetRunStatus(GetRunStatusTitle(), GetRunStatusSubtitle(), GetRunStatusComparison(), SingleplayerRunTitleColor, GetRunStatusComparisonColor(), ShouldShowRunStatus());
             ModOverlayRuntime.SetVerification(
                 _verificationTitle,
@@ -870,10 +873,7 @@ namespace ItsFrosti.SpeedrunningMod.RunTracking
 
         private static bool ShouldShowRunStatus()
         {
-            if (IsBetterRngTimedRunActive())
-            {
-                return false;
-            }
+            if (!ModClientSessionMode.IsRankedMultiplayerSelected) return false;
 
             return (_activeRunMode != ModSingleplayerRunMode.None &&
                 (_state == ModGameStateKind.InGame ||

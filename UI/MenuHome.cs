@@ -11,7 +11,7 @@ namespace ItsFrosti.SpeedrunningMod.Ui
     {
         private const string LeaderboardHomeGroupName = "ModLeaderboardHome";
         private const string UpdatePanelBodyObjectName = "ModUpdatePanelBody";
-        private const string UpdatePanelBodyText = "Ported the mod to SNSRModLoader, removed Practice Save Files, and added Settings for choosing Display Name and Toggling Server.";
+        private const string UpdatePanelBodyText = "Updated UI and Improved In-Game Timer.";
         private const int UpdatePanelBodyFontSize = 14;
 
         private static void EnsureLeaderboardHomeGroup(MainMenuRightSide rightSide)

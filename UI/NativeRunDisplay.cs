@@ -9,6 +9,8 @@ namespace ItsFrosti.SpeedrunningMod.Ui
         private static OverlayBehaviour _behaviour;
         private static string _timerText = "0.000";
         private static bool _timerVisible;
+        private static string _categoryText = string.Empty;
+        private static GUIStyle _categoryStyle;
         private static string _runTitleText = string.Empty;
         private static string _runSubtitleText = string.Empty;
         private static string _runComparisonText = string.Empty;
@@ -71,6 +73,11 @@ namespace ItsFrosti.SpeedrunningMod.Ui
             _timerVisible = visible;
         }
 
+        public static void SetCategoryLabel(string text)
+        {
+            _categoryText = text ?? string.Empty;
+        }
+
         public static void SetRunStatus(string title, string subtitle, string comparison, Color titleColor, Color comparisonColor, bool visible)
         {
             EnsureInstalled();
@@ -125,14 +132,12 @@ namespace ItsFrosti.SpeedrunningMod.Ui
                 return;
             }
 
-            if (template.font != null)
-            {
-                _font = template.font;
-            }
-
+            if (template.font == null) return;
+            if (_font == template.font && _fontStyle == template.fontStyle) return;
+            _font = template.font;
             _fontStyle = template.fontStyle;
-            _textColor = template.color;
-            _textColor.a = 1f; // A HUD fade must not fade the persistent race overlay.
+            _textColor = Color.white;
+            _categoryStyle = null;
             _topRightStyle = null;
             _timerOutlineStyle = null;
             _runTitleStyle = null;
@@ -148,10 +153,14 @@ namespace ItsFrosti.SpeedrunningMod.Ui
         private static void Draw()
         {
             RefreshTemplateStyle();
+            PrepareGlyphs();
+
+            if (_timerVisible && !string.IsNullOrEmpty(_categoryText))
+                DrawTopRightLabel(_categoryText, 18, 12f, _textColor);
 
             if (_timerVisible && !string.IsNullOrEmpty(_timerText))
             {
-                DrawTopRightLabel(_timerText, 42, 0f, _textColor);
+                DrawTopRightLabel(_timerText, 42, 40f, _textColor);
             }
 
             if (_runStatusVisible && !string.IsNullOrEmpty(_runTitleText))
@@ -180,7 +189,12 @@ namespace ItsFrosti.SpeedrunningMod.Ui
             GUIStyle style = GetTopRightStyle(fontSize, color);
 
             Vector2 size = style.CalcSize(new GUIContent(text));
-            Rect rect = new Rect(Screen.width - size.x - 14f, top, size.x + 2f, size.y + 4f);
+            Rect rect = new Rect(Screen.width - size.x - 12f, top, size.x + 2f, size.y + 4f);
+            if (fontSize != 42)
+            {
+                GUI.Label(rect, text, style);
+                return;
+            }
             if (_timerOutlineStyle == null)
             {
                 _timerOutlineStyle = new GUIStyle(style);
@@ -226,14 +240,39 @@ namespace ItsFrosti.SpeedrunningMod.Ui
 
         private static GUIStyle GetTopRightStyle(int fontSize, Color color)
         {
+            if (fontSize == 18)
+            {
+                if (_categoryStyle == null)
+                {
+                    _categoryStyle = CreateBaseStyle(TextAnchor.UpperRight);
+                    _categoryStyle.fontSize = 18;
+                }
+                _categoryStyle.normal.textColor = color;
+                return _categoryStyle;
+            }
             if (_topRightStyle == null)
             {
                 _topRightStyle = CreateBaseStyle(TextAnchor.UpperRight);
+                _topRightStyle.fontSize = fontSize;
             }
-
-            _topRightStyle.fontSize = fontSize;
             _topRightStyle.normal.textColor = color;
             return _topRightStyle;
+        }
+
+        private static void PrepareGlyphs()
+        {
+            if (_font == null || !_font.dynamic) return;
+            // Populate the shared dynamic font atlas before drawing any labels.
+            // Requesting glyphs midway through drawing can invalidate earlier text.
+            if (_timerVisible) { Request(_categoryText, 18); Request(_timerText, 42); }
+            if (_runStatusVisible) { Request(_runTitleText, 28); Request(_runSubtitleText, 24); Request(_runComparisonText, 21); }
+            if (_verificationVisible) { Request(_verificationTitleText, 28); Request(_verificationDetailText, 22); }
+            if (_topCenterVisible) { Request(_topCenterTitleText, 30); Request(_topCenterDetailText, 22); }
+            if (_centerMessageVisible) Request(_centerMessageText, 44);
+        }
+        private static void Request(string text, int size)
+        {
+            if (!string.IsNullOrEmpty(text)) _font.RequestCharactersInTexture(text, size, _fontStyle);
         }
 
         private static GUIStyle GetRunTitleStyle()
@@ -411,6 +450,7 @@ namespace ItsFrosti.SpeedrunningMod.Ui
 
         internal static void Clear()
         {
+            _categoryText = string.Empty;
             _timerVisible = _runStatusVisible = _verificationVisible = _topCenterVisible = _centerMessageVisible = false;
         }
 
@@ -434,12 +474,16 @@ namespace ItsFrosti.SpeedrunningMod.Ui
 
             private void OnGUI()
             {
+                if (Event.current.type != EventType.Repaint) return;
+                int previousDepth = GUI.depth;
+                bool previousEnabled = GUI.enabled;
                 GUI.depth = -10000;
                 Color previous = GUI.color;
                 Color previousContent = GUI.contentColor;
                 Matrix4x4 previousMatrix = GUI.matrix;
                 try
                 {
+                    GUI.enabled = true;
                     GUI.color = Color.white;
                     GUI.contentColor = Color.white;
                     GUI.matrix = Matrix4x4.identity;
@@ -447,6 +491,8 @@ namespace ItsFrosti.SpeedrunningMod.Ui
                 }
                 finally
                 {
+                    GUI.depth = previousDepth;
+                    GUI.enabled = previousEnabled;
                     GUI.color = previous;
                     GUI.contentColor = previousContent;
                     GUI.matrix = previousMatrix;

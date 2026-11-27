@@ -4,6 +4,15 @@ namespace ItsFrosti.SpeedrunningMod.RunTracking
 
     internal static class RunTimingEligibility
     {
+        internal static string CategoryLabel(ModSingleplayerRunMode mode, bool betterRng, bool singleplayerRace)
+        {
+            if (mode == ModSingleplayerRunMode.None) return string.Empty;
+            string category = mode.ToString();
+            if (betterRng) return category + ", BetterRNG";
+            if (singleplayerRace) return category + ", Filtered Seed";
+            return category;
+        }
+
         // Race and BetterRNG share mode selection so Creative cannot be silently
         // excluded by a separate gate before its movement-based timer is reached.
         internal static ModSingleplayerRunMode Resolve(GameMode mode, bool raceSelected, bool betterRngSelected, bool continueMode)
