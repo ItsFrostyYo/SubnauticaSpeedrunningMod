@@ -36,6 +36,8 @@ namespace ItsFrosti.SpeedrunningMod.Ui
         private static float _nextTemplateRefreshAt;
         private static GUIStyle _topRightStyle;
         private static GUIStyle _timerOutlineStyle;
+        private static GUIStyle _queueTitleStyle;
+        private static GUIStyle _queueDetailStyle;
         private static GUIStyle _runTitleStyle;
         private static GUIStyle _runSubtitleStyle;
         private static GUIStyle _runComparisonStyle;
@@ -57,6 +59,7 @@ namespace ItsFrosti.SpeedrunningMod.Ui
             {
                 root = new GameObject(OverlayRootName);
                 Object.DontDestroyOnLoad(root);
+                root.AddComponent<SceneCleanerPreserve>();
             }
 
             _behaviour = root.GetComponent<OverlayBehaviour>();
@@ -140,6 +143,8 @@ namespace ItsFrosti.SpeedrunningMod.Ui
             _categoryStyle = null;
             _topRightStyle = null;
             _timerOutlineStyle = null;
+            _queueTitleStyle = null;
+            _queueDetailStyle = null;
             _runTitleStyle = null;
             _runSubtitleStyle = null;
             _runComparisonStyle = null;
@@ -154,6 +159,7 @@ namespace ItsFrosti.SpeedrunningMod.Ui
         {
             RefreshTemplateStyle();
             PrepareGlyphs();
+            if (ModRankedMatchmakingRuntimeHost.IsBusy) DrawQueueStatus();
 
             if (_timerVisible && !string.IsNullOrEmpty(_categoryText))
                 DrawTopRightLabel(_categoryText, 18, 12f, _textColor);
@@ -182,6 +188,28 @@ namespace ItsFrosti.SpeedrunningMod.Ui
             {
                 DrawCenterMessage();
             }
+        }
+
+        private static void DrawQueueStatus()
+        {
+            string title = ModRankedMatchmakingRuntimeHost.GetHudTitle();
+            string detail = ModRankedMatchmakingRuntimeHost.GetHudDetail();
+            float width = System.Math.Min(600f, Screen.width * 0.6f);
+            float left = (Screen.width - width) * 0.5f;
+            float top = 16f;
+            if (_queueTitleStyle == null)
+            {
+                _queueTitleStyle = CreateBaseStyle(TextAnchor.UpperCenter);
+                _queueTitleStyle.fontSize = 24;
+                _queueTitleStyle.wordWrap = true;
+                _queueDetailStyle = new GUIStyle(_queueTitleStyle);
+                _queueDetailStyle.fontSize = 28;
+            }
+            var titleStyle = _queueTitleStyle;
+            float height = titleStyle.CalcHeight(new GUIContent(title), width);
+            GUI.Label(new Rect(left, top, width, height + 4f), title, titleStyle);
+            var detailStyle = _queueDetailStyle;
+            GUI.Label(new Rect(left, top + height + 4f, width, 70f), detail, detailStyle);
         }
 
         private static void DrawTopRightLabel(string text, int fontSize, float top, Color color)
@@ -253,8 +281,8 @@ namespace ItsFrosti.SpeedrunningMod.Ui
             if (_topRightStyle == null)
             {
                 _topRightStyle = CreateBaseStyle(TextAnchor.UpperRight);
-                _topRightStyle.fontSize = fontSize;
             }
+            _topRightStyle.fontSize = fontSize;
             _topRightStyle.normal.textColor = color;
             return _topRightStyle;
         }
@@ -265,6 +293,7 @@ namespace ItsFrosti.SpeedrunningMod.Ui
             // Populate the shared dynamic font atlas before drawing any labels.
             // Requesting glyphs midway through drawing can invalidate earlier text.
             if (_timerVisible) { Request(_categoryText, 18); Request(_timerText, 42); }
+            if (ModRankedMatchmakingRuntimeHost.IsBusy) { Request(ModRankedMatchmakingRuntimeHost.GetHudTitle(), 24); Request(ModRankedMatchmakingRuntimeHost.GetHudDetail(), 28); }
             if (_runStatusVisible) { Request(_runTitleText, 28); Request(_runSubtitleText, 24); Request(_runComparisonText, 21); }
             if (_verificationVisible) { Request(_verificationTitleText, 28); Request(_verificationDetailText, 22); }
             if (_topCenterVisible) { Request(_topCenterTitleText, 30); Request(_topCenterDetailText, 22); }

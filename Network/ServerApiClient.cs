@@ -182,13 +182,13 @@ namespace ItsFrosti.SpeedrunningMod
         {
             if (!IsConfigured)
             {
-                throw new InvalidOperationException("The server address is not configured. Check ServerUrl in the plugin settings.ini.");
+                throw new InvalidOperationException("The automatic race service is unavailable. Please retry.");
             }
         }
 
         private string SendJsonRequest(string relativePath, string method, string requestBody)
         {
-            return NativeHttp.Send(new Uri(new Uri(_baseUrl), relativePath.TrimStart('/')).AbsoluteUri, method, requestBody);
+            return NativeHttp.Send(new Uri(new Uri(_baseUrl), relativePath.TrimStart('/')).AbsoluteUri, method, requestBody, RaceAccount.Bearer());
         }
 
         private static ModMatchmakingTicketDto ParseTicket(string json)
@@ -197,6 +197,7 @@ namespace ItsFrosti.SpeedrunningMod
             ModMatchmakingTicketDto ticket = new ModMatchmakingTicketDto
             {
                 ticketId = ReadString(root, "ticketId"),
+                opponentDisplayName = ReadString(root, "opponentDisplayName"),
                 status = ReadString(root, "status"),
                 mode = ReadString(root, "mode"),
                 playerId = ReadString(root, "playerId"),

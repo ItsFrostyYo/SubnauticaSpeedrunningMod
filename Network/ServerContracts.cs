@@ -33,6 +33,7 @@ namespace ItsFrosti.SpeedrunningMod
     [Serializable]
     public sealed class ModMatchmakingTicketDto
     {
+        public string opponentDisplayName;
         public string ticketId;
         public string status;
         public string mode;

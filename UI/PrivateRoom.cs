@@ -170,7 +170,7 @@ namespace ItsFrosti.SpeedrunningMod.Ui
         private static void PromptAndBeginPrivateRaceHost()
         {
             if (!CanConnect()) return;
-            ModPrivateRaceRoomRuntimeHost.BeginHosting(PluginSettings.DisplayName);
+            ModPrivateRaceRoomRuntimeHost.BeginHosting(RaceAccount.DisplayName);
         }
 
         private static void PromptAndBeginPrivateRaceJoin()
@@ -180,7 +180,7 @@ namespace ItsFrosti.SpeedrunningMod.Ui
             {
                 string code = ModPrivateRaceRoomRuntimeHost.SanitizeRoomCode(value);
                 if (!string.IsNullOrEmpty(code))
-                    ModPrivateRaceRoomRuntimeHost.BeginJoining(PluginSettings.DisplayName, code);
+                    ModPrivateRaceRoomRuntimeHost.BeginJoining(RaceAccount.DisplayName, code);
             });
         }
 

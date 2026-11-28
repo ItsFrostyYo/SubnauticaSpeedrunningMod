@@ -11,3 +11,6 @@ Race/Timing/README.md
 
 # Server is an independent Git repository.
 /Server/
+
+# Isolated rebuild outputs
+/artifacts/

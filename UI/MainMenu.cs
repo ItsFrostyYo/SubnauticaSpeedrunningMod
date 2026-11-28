@@ -93,6 +93,7 @@ namespace ItsFrosti.SpeedrunningMod.Ui
                 return;
             }
             HidePrivateRaceConnectingModal();
+            if (ModRankedMatchmakingRuntimeHost.IsBusy) UpdateMatchmakingPanel(currentMenu.rightSide);
             if (ModPrivateRaceRoomRuntimeHost.IsRoomActive)
             {
                 if (Time.unscaledTime >= _nextMenuPatchAttemptAt)
@@ -110,9 +111,9 @@ namespace ItsFrosti.SpeedrunningMod.Ui
 
         private static bool CanConnect()
         {
-            if (!PluginSettings.EnableNetworking)
+            if (string.IsNullOrEmpty(RaceAccount.PlayerId))
             {
-                ErrorMessage.AddMessage("Enable the server connection in Options > Race.");
+                ErrorMessage.AddMessage("Sign in with Google in Options > Race first.");
                 return false;
             }
             if (ModPrivateRaceRoomRuntimeHost.IsRoomActive || ModRankedMatchmakingRuntimeHost.IsBusy) return false;
@@ -122,7 +123,6 @@ namespace ItsFrosti.SpeedrunningMod.Ui
         internal static void SelectVanilla()
         {
             if (ModPrivateRaceRoomRuntimeHost.IsRoomActive) ModPrivateRaceRoomRuntimeHost.LeaveRoom();
-            if (ModRankedMatchmakingRuntimeHost.IsBusy) ModRankedMatchmakingRuntimeHost.CancelQueue();
             Ruleset8RaceSession.Reset();
             ModClientSessionMode.SelectVanilla();
         }
@@ -334,10 +334,10 @@ namespace ItsFrosti.SpeedrunningMod.Ui
             template.SetSiblingIndex(0);
             ConfigureActionRow(
                 template.gameObject,
-                QueueRandomRaceComingSoonLabel,
-                false,
+                RaceAccount.Enabled ? "Queue Random Race" : QueueRandomRaceComingSoonLabel,
+                RaceAccount.Enabled,
                 nativeFontSize,
-                null);
+                delegate { var side = modeSelectGroup.GetComponentInParent<MainMenuRightSide>(); if (side != null) side.OpenGroup(ModQueueGroupName); });
 
             GameObject hostRow = UnityEngine.Object.Instantiate(template.gameObject, content, false);
             hostRow.name = "NewGame";
@@ -402,8 +402,8 @@ namespace ItsFrosti.SpeedrunningMod.Ui
 
             QueueRowDefinition[] rows = new QueueRowDefinition[]
             {
-                new QueueRowDefinition("Queue Survival\nComing in Future Update", isInteractable: false, DisabledQueueButtonFontSize),
-                new QueueRowDefinition("Queue Creative\nComing in Future Update", isInteractable: false, DisabledQueueButtonFontSize),
+                new QueueRowDefinition(RaceAccount.Enabled ? "Queue Survival" : "Queue Survival\nComing in Future Update", RaceAccount.Enabled, DisabledQueueButtonFontSize),
+                new QueueRowDefinition(RaceAccount.Enabled ? "Queue Creative" : "Queue Creative\nComing in Future Update", RaceAccount.Enabled, DisabledQueueButtonFontSize),
                 new QueueRowDefinition("Hardcore\nComing in Future Update", isInteractable: false, DisabledQueueButtonFontSize)
             };
 
@@ -452,7 +452,7 @@ namespace ItsFrosti.SpeedrunningMod.Ui
             template.SetSiblingIndex(0);
             ConfigureActionRow(
                 template.gameObject,
-                "Cancel Matchmaking",
+                "Cancel Queue",
                 true,
                 26,
                 delegate
@@ -470,6 +470,23 @@ namespace ItsFrosti.SpeedrunningMod.Ui
         }
 
 
+
+        private static void UpdateMatchmakingPanel(MainMenuRightSide right)
+        {
+            var group = FindGroup(right, ModMatchmakingGroupName);
+            if (group == null) return;
+            var content = group.transform.Find("Scroll View/Viewport/SavedGameAreaContent");
+            if (content == null) return;
+            SetPanelTitle(group, ModRankedMatchmakingRuntimeHost.GetPanelTitle());
+            EnsurePanelPlaceholder(group, content, MatchmakingPlaceholderObjectName, ModRankedMatchmakingRuntimeHost.GetPanelMessage());
+            var row = content.Find("NewGame");
+            var button = row == null ? null : row.GetComponentInChildren<Button>(true);
+            if (button != null)
+            {
+                button.interactable = ModRankedMatchmakingRuntimeHost.CanCancel;
+                SetButtonLabel(button.gameObject, ModRankedMatchmakingRuntimeHost.CanCancel ? "Cancel Queue" : "Preparing Race...");
+            }
+        }
 
         private static void ConfigureQueueRow(GameObject row, QueueRowDefinition definition)
         {
@@ -499,8 +516,7 @@ namespace ItsFrosti.SpeedrunningMod.Ui
                     }
                     else
                     {
-                        ModClientSessionMode.SelectRankedMultiplayer();
-                        Plugin.Logger.Info(definition.Label + " pressed.");
+                        StartRankedMatchmaking("Survival");
                     }
                 }));
             }
@@ -698,8 +714,16 @@ namespace ItsFrosti.SpeedrunningMod.Ui
                 return;
             }
 
-            ModClientSessionMode.SelectVanilla();
-            rightSide.OpenGroup(ModModeSelectGroupName);
+            if (ModRankedMatchmakingRuntimeHost.IsBusy)
+            {
+                UpdateMatchmakingPanel(rightSide);
+                rightSide.OpenGroup(ModMatchmakingGroupName);
+            }
+            else
+            {
+                ModClientSessionMode.SelectVanilla();
+                rightSide.OpenGroup(ModModeSelectGroupName);
+            }
             SelectPrimaryButton(menu, modButton);
         }
 
@@ -778,7 +802,6 @@ namespace ItsFrosti.SpeedrunningMod.Ui
 
         private static void StartRankedMatchmaking(string mode)
         {
-            ModClientSessionMode.SelectRankedMultiplayer(mode);
             ModRankedMatchmakingRuntimeHost.StartQueue(mode);
 
             MainMenuRightSide rightSide = MainMenuRightSide.main;

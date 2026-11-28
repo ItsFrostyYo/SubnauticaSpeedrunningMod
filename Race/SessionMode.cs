@@ -19,6 +19,8 @@ namespace ItsFrosti.SpeedrunningMod
         private static string _multiplayerSeedId = string.Empty;
         private static string _multiplayerSeedValue = string.Empty;
         private static bool _privateRaceLocalSessionActive;
+        public static bool IsRandomQueueRace { get; private set; }
+        internal static void SetRandomQueueRace(bool value) { IsRandomQueueRace = value; }
         private static bool _privateRaceLocalHost;
         private static string _privateRaceLocalDisplayName = string.Empty;
 
@@ -192,6 +194,7 @@ namespace ItsFrosti.SpeedrunningMod
             _multiplayerOpponentDisplayName = string.Empty;
             _multiplayerSeedId = string.Empty;
             _multiplayerSeedValue = string.Empty;
+            IsRandomQueueRace = false;
             _privateRaceLocalSessionActive = false;
             _privateRaceLocalHost = false;
             _privateRaceLocalDisplayName = string.Empty;

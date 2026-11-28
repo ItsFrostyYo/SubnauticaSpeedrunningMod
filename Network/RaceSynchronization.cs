@@ -31,6 +31,7 @@ namespace ItsFrosti.SpeedrunningMod
         private static string _localLatestSplitName = string.Empty;
         private static bool _forfeitSent;
         private static bool _raceOverMenuShown;
+        private static bool _winnerSpectatorApplied;
 
         internal static void Shutdown()
         {
@@ -57,7 +58,7 @@ namespace ItsFrosti.SpeedrunningMod
                 return;
             }
 
-            if (!multiplayerActive || _context == null || !PluginSettings.EnableNetworking || !Plugin.Server.IsConfigured)
+            if (!multiplayerActive || _context == null || !Plugin.Server.IsConfigured)
             {
                 Reset();
                 return;
@@ -81,7 +82,7 @@ namespace ItsFrosti.SpeedrunningMod
 
         public static void NotifyLocalReadyForCountdown()
         {
-            if (!_installed || _readySent || _context == null || !PluginSettings.EnableNetworking || !Plugin.Server.IsConfigured)
+            if (!_installed || _readySent || _context == null || !Plugin.Server.IsConfigured)
             {
                 return;
             }
@@ -190,7 +191,7 @@ namespace ItsFrosti.SpeedrunningMod
 
         public static void OnLocalSplitAdvanced(int sequenceNumber, string splitDisplayName, long elapsedMilliseconds, long loadlessElapsedMilliseconds)
         {
-            if (!_installed || !PluginSettings.EnableNetworking || !Plugin.Server.IsConfigured || !ModClientSessionMode.IsRankedMultiplayerSelected)
+            if (!_installed || !Plugin.Server.IsConfigured || !ModClientSessionMode.IsRankedMultiplayerSelected)
             {
                 return;
             }
@@ -249,7 +250,7 @@ namespace ItsFrosti.SpeedrunningMod
 
         public static void NotifyForfeitIfNeeded()
         {
-            if (!_installed || _forfeitSent || _finishSent || !PluginSettings.EnableNetworking || !Plugin.Server.IsConfigured)
+            if (!_installed || _forfeitSent || _finishSent || !Plugin.Server.IsConfigured)
             {
                 return;
             }
@@ -532,7 +533,7 @@ namespace ItsFrosti.SpeedrunningMod
             }
 
             int comparableSequence;
-            if (!TryGetLatestComparableSequence(localPlayer, opponent, out comparableSequence) || comparableSequence <= 0)
+            if (!TryGetLatestComparableSequence(localPlayer, opponent, out comparableSequence) || comparableSequence <= 1)
             {
                 return false;
             }
@@ -581,7 +582,7 @@ namespace ItsFrosti.SpeedrunningMod
             int localHighest = GetHighestKnownSplitSequence(localPlayer, _localSplitSequence);
             int opponentHighest = GetHighestKnownSplitSequence(opponent, 0);
             int maxCommon = Math.Min(localHighest, opponentHighest);
-            for (int sequenceNumber = maxCommon; sequenceNumber >= 1; sequenceNumber--)
+            for (int sequenceNumber = maxCommon; sequenceNumber >= 2; sequenceNumber--)
             {
                 long localTime;
                 long opponentTime;
@@ -702,9 +703,15 @@ namespace ItsFrosti.SpeedrunningMod
             if (string.Equals(localPlayer.result, "Win", StringComparison.OrdinalIgnoreCase))
             {
                 _finishSent = true;
-                string detailText = string.Equals(GetOpponentPlayer() != null ? GetOpponentPlayer().result : string.Empty, "Forfeit", StringComparison.OrdinalIgnoreCase)
+                bool opponentForfeited = string.Equals(GetOpponentPlayer() != null ? GetOpponentPlayer().result : string.Empty, "Forfeit", StringComparison.OrdinalIgnoreCase);
+                if (opponentForfeited && !_winnerSpectatorApplied &&
+                    !RunTracking.SingleplayerRunRuntimeHost.HasLaunchedRocket && !LaunchRocket.isLaunching)
+                {
+                    _winnerSpectatorApplied = FreecamSession.TrySpectateForfeitWin();
+                }
+                string detailText = opponentForfeited
                     ? GetOpponentDisplayNameOrDefault() + " forfeited."
-                    : "Return to room when ready.";
+                    : (ModClientSessionMode.IsRandomQueueRace ? "Return to Main Menu when ready." : "Return to the private room when ready.");
                 ModOverlayRuntime.SetTopCenterMessage("You Win", detailText, AheadComparisonColor, Color.white, true);
                 return;
             }
@@ -724,7 +731,7 @@ namespace ItsFrosti.SpeedrunningMod
             string titleText = string.Equals(localPlayer.result, "Forfeit", StringComparison.OrdinalIgnoreCase)
                 ? "Race Forfeited"
                 : "Opponent Won";
-            ModOverlayRuntime.SetTopCenterMessage(titleText, "Return to room when ready.", BehindComparisonColor, Color.white, true);
+            ModOverlayRuntime.SetTopCenterMessage(titleText, (ModClientSessionMode.IsRandomQueueRace ? "Return to Main Menu when ready." : "Return to the private room when ready."), BehindComparisonColor, Color.white, true);
             ModOverlayRuntime.SetCenterMessage(string.Empty, Color.white, false);
             try
             {
@@ -732,7 +739,7 @@ namespace ItsFrosti.SpeedrunningMod
                 {
                     IngameMenu.main.Open();
                     IngameMenu.main.ChangeSubscreen("Main");
-                    _raceOverMenuShown = true;
+                    _raceOverMenuShown = IngameMenu.main.gameObject.activeInHierarchy && IngameMenu.main.selected;
                 }
             }
             catch (Exception ex)
@@ -761,6 +768,7 @@ namespace ItsFrosti.SpeedrunningMod
                 _localLatestSplitName = string.Empty;
                 _forfeitSent = false;
                 _raceOverMenuShown = false;
+                _winnerSpectatorApplied = false;
                 ModOverlayRuntime.SetTopCenterMessage(string.Empty, string.Empty, Color.white, Color.white, false);
             }
         }

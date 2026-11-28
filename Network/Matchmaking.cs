@@ -1,349 +1,245 @@
 using System;
+using System.Diagnostics;
 using System.Threading;
 using UnityEngine;
-using ItsFrosti.SpeedrunningMod.Seeds;
+using UnityEngine.SceneManagement;
+using ItsFrosti.SpeedrunningMod.Ui;
 using ItsFrosti.SpeedrunningMod.Seeds.Ruleset8;
 
 namespace ItsFrosti.SpeedrunningMod
 {
     internal static class ModRankedMatchmakingRuntimeHost
     {
-        private enum MatchmakingUiState
-        {
-            Idle,
-            QueueStarting,
-            QueueWaiting,
-            MatchFound,
-            Launching,
-            Error
-        }
-
+        private enum Phase { Idle, Waiting, Found, Transitioning, Error }
+        private enum Operation { Enqueue, Poll, Cancel, Snapshot }
         private static readonly object Sync = new object();
-        private static int requestVersion;
-        private static SNSRModLoader.PluginContext _context;
-        private static bool _installed;
-        private static MatchmakingUiState _state = MatchmakingUiState.Idle;
-        private static string _queuedMode = string.Empty;
-        private static string _ticketId = string.Empty;
-        private static string _message = string.Empty;
-        private static bool _requestInFlight;
-        private static ModMatchmakingTicketDto _pendingTicket;
-        private static ModMatchmakingTicketDto _currentTicket;
-        private static string _pendingError = string.Empty;
-        private static bool _hasPendingResponse;
-        private static float _nextPollAt;
-        private static bool _launchTriggered;
+        private static readonly Stopwatch Clock = Stopwatch.StartNew();
+        private static readonly QueueTiming Timing = new QueueTiming();
+        private static Phase phase;
+        private static string mode = "", ticketId = "", message = "";
+        private static ModMatchmakingTicketDto ticket;
+        private static ModMatchStateDto assignment;
+        private static bool installed, inFlight, cancelRequested, quitRequested, backgroundOverride, previousBackground;
+        private static int version;
+        private static double nextPoll;
+        private static volatile bool hasPending;
+        private static ModMatchmakingTicketDto pendingTicket;
+        private static ModMatchStateDto pendingAssignment;
+        private static string pendingError;
+        private static long pendingStatus;
+        private static Operation pendingOperation;
+        private static double Now { get { return Clock.Elapsed.TotalSeconds; } }
 
-        internal static void Shutdown()
+        internal static void Install(SNSRModLoader.PluginContext context) { installed = true; }
+        internal static void Shutdown() { installed = false; Reset(); }
+        public static bool IsBusy { get { return phase != Phase.Idle; } }
+        public static bool IsQueuePanelVisible { get { return IsBusy; } }
+        public static bool CanCancel { get { return IsBusy && phase != Phase.Transitioning; } }
+        internal static bool IsWorldTransitionPending { get { return phase == Phase.Transitioning; } }
+        public static void ResetForMainMenu() { /* Queues survive world/menu transitions. */ }
+        public static string GetPanelTitle() { return GetHudTitle(); }
+        public static string GetPanelMessage() { return GetHudDetail() + (string.IsNullOrEmpty(message) ? "" : "\n" + message); }
+        internal static string GetHudTitle()
         {
-            _installed = false;
-            ResetState();
-            _context = null;
+            return Timing.HasOpponent ? "Found Opponent, " + (string.IsNullOrEmpty(Timing.OpponentName) ? "Opponent" : Timing.OpponentName)
+                : "In Queue for " + mode;
         }
-
-        public static void Install(SNSRModLoader.PluginContext context)
+        internal static string GetHudDetail()
         {
-            if (_installed)
+            if (phase == Phase.Error) return message;
+            if (cancelRequested) return "Cancelling Queue";
+            if (Timing.HasOpponent)
             {
-                return;
+                if (!Timing.ServerReady) return "Connecting to Server";
+                int seconds = Timing.Countdown(Now);
+                if (seconds > 0) return seconds.ToString();
+                return assignment == null ? "Connecting to Server" : "Preparing Race";
             }
-
-            _context = context;
-            ModClientIdentityStore.Initialize(context);
-            _installed = true;
-            Plugin.Logger.Info("Ranked matchmaking runtime installed.");
+            return phase == Phase.Error ? message : Timing.Elapsed(Now);
         }
 
-        public static bool IsQueuePanelVisible
+        public static void StartQueue(string category)
         {
-            get
-            {
-                return _state == MatchmakingUiState.QueueStarting ||
-                       _state == MatchmakingUiState.QueueWaiting ||
-                       _state == MatchmakingUiState.MatchFound ||
-                       _state == MatchmakingUiState.Launching ||
-                       _state == MatchmakingUiState.Error;
-            }
+            if (!installed || IsBusy) return;
+            if (string.IsNullOrEmpty(RaceAccount.PlayerId)) { ErrorMessage.AddMessage("Sign in with Google in Options > Race first."); return; }
+            if (ModPrivateRaceRoomRuntimeHost.IsRoomActive || !string.IsNullOrEmpty(ModClientSessionMode.RankedMultiplayerMatchId)) return;
+            mode = category; phase = Phase.Waiting; Timing.Start(Now);
+            ticketId = message = ""; ticket = null; assignment = null;
+            cancelRequested = quitRequested = false; nextPoll = Now;
+            previousBackground = Application.runInBackground; Application.runInBackground = true; backgroundOverride = true;
+            Request(Operation.Enqueue);
         }
-
-        public static bool IsBusy
-        {
-            get { return _state != MatchmakingUiState.Idle; }
-        }
-
-        public static void ResetForMainMenu()
-        {
-            ResetState();
-        }
-
-        public static string GetPanelTitle()
-        {
-            if (string.IsNullOrEmpty(_queuedMode))
-            {
-                return "Waiting for Matchmaking";
-            }
-
-            return "Waiting for Matchmaking (" + _queuedMode + ")";
-        }
-
-        public static string GetPanelMessage()
-        {
-            return string.IsNullOrEmpty(_message) ? "Searching for opponent..." : _message;
-        }
-
-        public static void StartQueue(string mode)
-        {
-            if (!_installed || _context == null)
-            {
-                return;
-            }
-
-            if (!PluginSettings.EnableNetworking || !Plugin.Server.IsConfigured)
-            {
-                SetErrorState("Enable the server connection in Options > Speedrunning.");
-                return;
-            }
-
-            if (_requestInFlight || _state == MatchmakingUiState.QueueWaiting || _state == MatchmakingUiState.QueueStarting)
-            {
-                return;
-            }
-
-            _queuedMode = string.IsNullOrEmpty(mode) ? "Creative" : mode;
-            _ticketId = string.Empty;
-            _message = "Joining " + _queuedMode + " matchmaking...";
-            _state = MatchmakingUiState.QueueStarting;
-            _launchTriggered = false;
-            BeginBackgroundRequest(BackgroundOperation.Enqueue, _queuedMode, string.Empty);
-        }
-
         public static void CancelQueue()
         {
-            if (!_installed)
-            {
-                return;
-            }
-
-            string ticketId = _ticketId;
-            string queuedMode = _queuedMode;
-            ResetState();
-
-            if (!string.IsNullOrEmpty(ticketId) && _context != null && Plugin.Server.IsConfigured)
-            {
-                BeginBackgroundRequest(BackgroundOperation.Cancel, queuedMode, ticketId);
-            }
+            if (!CanCancel) return;
+            if (string.IsNullOrEmpty(ticketId) && !inFlight) { Reset(); return; }
+            cancelRequested = true;
+            if (!inFlight && !string.IsNullOrEmpty(ticketId)) Request(Operation.Cancel);
         }
-
         public static void Update()
         {
-            if (!_installed || _context == null)
+            if (!installed || !IsBusy) return;
+            ModOverlayRuntime.EnsureInstalled();
+            Consume();
+            if (!IsBusy) return;
+            if (Timing.ConnectionTimedOut(Now) && phase != Phase.Error)
             {
-                return;
+                phase = Phase.Error;
+                message = "Could not connect to the race server. Cancel the queue and try again.";
             }
-
-            ConsumePendingResponse();
-
-            if ((_state == MatchmakingUiState.QueueStarting || _state == MatchmakingUiState.QueueWaiting) &&
-                !_requestInFlight &&
-                !string.IsNullOrEmpty(_ticketId) &&
-                Time.unscaledTime >= _nextPollAt)
+            if (phase == Phase.Error && !cancelRequested) return;
+            if (!inFlight && Now >= nextPoll)
             {
-                BeginBackgroundRequest(BackgroundOperation.Poll, _queuedMode, _ticketId);
+                if (cancelRequested && !string.IsNullOrEmpty(ticketId)) Request(Operation.Cancel);
+                else if (ticket != null && ticket.match != null && assignment == null) Request(Operation.Snapshot);
+                else if (!string.IsNullOrEmpty(ticketId)) Request(Operation.Poll);
+                else if (string.IsNullOrEmpty(ticketId) && phase != Phase.Error) Request(Operation.Enqueue);
             }
-
-            if (_state == MatchmakingUiState.MatchFound && !_launchTriggered)
+            if (!cancelRequested && (phase == Phase.Found || phase == Phase.Transitioning) && Timing.ServerReady && assignment != null && Timing.Countdown(Now) == 0)
             {
-                TryLaunchMatchedGame();
+                phase = Phase.Transitioning;
+                TransitionToMatchedWorld();
             }
         }
-
-        private static void ConsumePendingResponse()
+        private static void TransitionToMatchedWorld()
         {
-            if (!_hasPendingResponse)
+            // Do not touch the old world's seed while it is loading, saving, or unloading.
+            bool loading = uGUI.main != null && uGUI.main.loading != null && uGUI.main.loading.IsLoading;
+            if (loading || (SaveLoadManager.main != null && SaveLoadManager.main.isSaving)) return;
+            bool atMenu = Player.main == null && uGUI_MainMenu.main != null &&
+                uGUI_MainMenu.main.gameObject.activeInHierarchy &&
+                !string.Equals(SceneManager.GetActiveScene().name, "Main", StringComparison.OrdinalIgnoreCase) &&
+                !Ruleset8RaceSession.IsStartingNewGame(uGUI_MainMenu.main);
+            if (!atMenu)
             {
+                if (!quitRequested && IngameMenu.main != null)
+                {
+                    quitRequested = true;
+                    Plugin.Logger.Info("Queue preparation finished; unloading the current world through native QuitGame.");
+                    IngameMenu.main.QuitGame(false);
+                }
                 return;
             }
-
-            ModMatchmakingTicketDto ticket;
-            string pendingError;
-            lock (Sync)
-            {
-                ticket = _pendingTicket;
-                pendingError = _pendingError;
-                _pendingTicket = null;
-                _pendingError = string.Empty;
-                _hasPendingResponse = false;
-                _requestInFlight = false;
-            }
-
-            if (!string.IsNullOrEmpty(pendingError))
-            {
-                SetErrorState(pendingError);
-                return;
-            }
-
-            if (ticket == null)
-            {
-                return;
-            }
-
-            _ticketId = ticket.ticketId ?? string.Empty;
-            _queuedMode = string.IsNullOrEmpty(ticket.mode) ? _queuedMode : ticket.mode;
-            _message = string.IsNullOrEmpty(ticket.message) ? "Searching for opponent..." : ticket.message;
-            _currentTicket = ticket;
-
-            string status = ticket.status ?? string.Empty;
-            if (string.Equals(status, "Matched", StringComparison.OrdinalIgnoreCase) && ticket.match != null)
-            {
-                _state = MatchmakingUiState.MatchFound;
-                _nextPollAt = 0f;
-                return;
-            }
-
-            if (string.Equals(status, "Cancelled", StringComparison.OrdinalIgnoreCase))
-            {
-                ResetState();
-                return;
-            }
-
-            _state = MatchmakingUiState.QueueWaiting;
-            _nextPollAt = Time.unscaledTime + 1.25f;
+            if (assignment == null) return;
+            if (assignment.players == null || assignment.players.Length != 2 ||
+                !string.Equals(assignment.status, "WaitingForReady", StringComparison.OrdinalIgnoreCase))
+            { Reset(); ErrorMessage.AddMessage("Assigned race is no longer ready. Please queue again."); return; }
+            var readyAssignment = assignment;
+            // Release queue UI/background scope before starting the native new-game path.
+            Reset();
+            ModPrivateRaceRoomRuntimeHost.BeginQueuedRace(readyAssignment);
         }
-
-        private static void TryLaunchMatchedGame()
+        private static void Request(Operation operation)
         {
-            ModMatchmakingTicketDto ticket = GetLatestTicketSnapshot();
-            if (ticket == null || ticket.match == null)
-            {
-                return;
-            }
-
-            GameMode gameMode;
-            string mode = ticket.match.mode ?? string.Empty;
-            if (string.Equals(mode, "Survival", StringComparison.OrdinalIgnoreCase)) gameMode = GameMode.Survival;
-            else if (string.Equals(mode, "Creative", StringComparison.OrdinalIgnoreCase)) gameMode = GameMode.Creative;
-            else if (string.Equals(mode, "Hardcore", StringComparison.OrdinalIgnoreCase)) gameMode = GameMode.Hardcore;
-            else { SetErrorState("The server returned an unsupported race mode."); return; }
-            if (!Ruleset8SeedPool.HasSeeds(gameMode))
-            {
-                SetErrorState(mode + " has no filtered race seeds available yet.");
-                return;
-            }
-            if (!string.Equals(ticket.match.seedId, "Ruleset-8", StringComparison.Ordinal) ||
-                !Ruleset8RaceSession.Prepare(ticket.match.seedValue, gameMode))
-            {
-                SetErrorState("The server must supply a Ruleset 8 seed from the filtered " + mode + " pool.");
-                return;
-            }
-            _launchTriggered = true;
-            _state = MatchmakingUiState.Launching;
-            _message = "Match found. Launching " + mode + " ranked match...";
-
-            ModClientSessionMode.ActivateRankedMultiplayerMatch(
-                ticket.match.mode ?? "Creative",
-                ticket.match.matchId ?? string.Empty,
-                ticket.match.playerId ?? string.Empty,
-                ticket.match.opponentPlayerId ?? string.Empty,
-                ticket.match.opponentDisplayName ?? string.Empty,
-                ticket.match.seedId ?? string.Empty,
-                ticket.match.seedValue ?? string.Empty);
-
-            uGUI_MainMenu menu = uGUI_MainMenu.main;
-            if (menu == null)
-            {
-                SetErrorState("Match found, but the main menu was not available to start the run.");
-                return;
-            }
-
-            Plugin.StartGame(gameMode);
-        }
-
-        private static ModMatchmakingTicketDto GetLatestTicketSnapshot()
-        {
-            return _currentTicket;
-        }
-
-        private static void BeginBackgroundRequest(BackgroundOperation operation, string mode, string ticketId)
-        {
-            if (_requestInFlight || _context == null)
-            {
-                return;
-            }
-
-            _requestInFlight = true;
-            int version = requestVersion;
+            if (inFlight) return;
+            inFlight = true; int requestVersion = version;
+            string id = ticketId, category = mode;
+            string matchId = ticket == null || ticket.match == null ? "" : ticket.match.matchId;
             ThreadPool.QueueUserWorkItem(delegate
             {
-                if (Plugin.IsShuttingDown || version != requestVersion) return;
-                ModMatchmakingTicketDto response = null;
-                string error = string.Empty;
-
+                ModMatchmakingTicketDto result = null; ModMatchStateDto snapshot = null;
+                string error = ""; long status = 0;
                 try
                 {
-                    ModClientIdentity identity = ModClientIdentityStore.GetIdentity();
-                    switch (operation)
-                    {
-                        case BackgroundOperation.Enqueue:
-                            response = Plugin.Server.EnqueueMatchmaking(identity, mode);
-                            break;
-                        case BackgroundOperation.Cancel:
-                            response = Plugin.Server.CancelMatchmaking(ticketId, identity.PlayerId);
-                            break;
-                        case BackgroundOperation.Poll:
-                            response = Plugin.Server.GetMatchmakingTicket(ticketId);
-                            break;
-                    }
+                    if (Plugin.IsShuttingDown) return;
+                    if (operation == Operation.Enqueue) result = Plugin.Server.EnqueueMatchmaking(ModClientIdentityStore.GetIdentity(), category);
+                    else if (operation == Operation.Poll) result = Plugin.Server.GetMatchmakingTicket(id);
+                    else if (operation == Operation.Cancel) result = Plugin.Server.CancelMatchmaking(id, RaceAccount.PlayerId);
+                    else snapshot = Plugin.Server.GetMatchState(matchId);
                 }
                 catch (Exception ex)
                 {
-                    if (Plugin.IsShuttingDown) return;
-                    error = ex.Message;
-                    Plugin.Logger.Warning("Matchmaking request failed: " + ex.Message);
+                    error = ex.Message; var http = ex as NativeHttpFailure; if (http != null) status = http.StatusCode;
+                    Plugin.Logger.Warning("Queue request failed: " + error);
                 }
-
                 lock (Sync)
                 {
-                    if (Plugin.IsShuttingDown || version != requestVersion) return;
-                    _pendingTicket = response;
-                    _pendingError = error;
-                    _hasPendingResponse = true;
+                    if (Plugin.IsShuttingDown || requestVersion != version) return;
+                    pendingTicket = result; pendingAssignment = snapshot; pendingError = error;
+                    pendingStatus = status; pendingOperation = operation; hasPending = true;
                 }
             });
         }
-
-        private static void ResetState()
+        private static void Consume()
+        {
+            if (!hasPending) return;
+            ModMatchmakingTicketDto result; ModMatchStateDto snapshot; string error; long status; Operation operation;
+            lock (Sync)
+            {
+                result = pendingTicket; snapshot = pendingAssignment; error = pendingError;
+                status = pendingStatus; operation = pendingOperation; hasPending = false; inFlight = false;
+            }
+            nextPoll = Now + 1.25;
+            if (!string.IsNullOrEmpty(error))
+            {
+                if (operation == Operation.Cancel && (status == 401 || status == 403 || status == 404))
+                {
+                    Reset();
+                    ErrorMessage.AddMessage(error);
+                    return;
+                }
+                if (operation == Operation.Cancel && status == 409) { cancelRequested = false; nextPoll = Now; return; }
+                if (operation == Operation.Snapshot && status == 404)
+                {
+                    Plugin.Logger.Warning("Discarding missing race assignment and requesting a fresh queue ticket.");
+                    StartFreshTicket();
+                    return;
+                }
+                message = Timing.HasOpponent ? "Connecting to Server" : "Reconnecting to queue...";
+                if (status == 401 || status == 403 || status == 404) { message = error; phase = Phase.Error; }
+                return;
+            }
+            message = "";
+            if (snapshot != null)
+            {
+                if (snapshot.players == null || snapshot.players.Length != 2 ||
+                    !string.Equals(snapshot.status, "WaitingForReady", StringComparison.OrdinalIgnoreCase))
+                {
+                    phase = Phase.Error;
+                    message = "Assigned race is no longer available. Cancel the queue and try again.";
+                    return;
+                }
+                assignment = snapshot;
+                Timing.Connected(Now);
+                Plugin.Logger.Info("Queue race server connected; preparation countdown: " + Timing.Countdown(Now) + " seconds.");
+                return;
+            }
+            if (result == null) return;
+            ticket = result; ticketId = result.ticketId;
+            if (string.Equals(result.status, "Cancelled", StringComparison.OrdinalIgnoreCase))
+            {
+                string reason = result.message;
+                bool requested = cancelRequested;
+                Reset();
+                if (!requested && !string.IsNullOrEmpty(reason)) ErrorMessage.AddMessage(reason);
+                return;
+            }
+            bool paired = string.Equals(result.status, "Provisioning", StringComparison.OrdinalIgnoreCase) || string.Equals(result.status, "Matched", StringComparison.OrdinalIgnoreCase);
+            if (paired)
+            {
+                string name = result.match == null ? result.opponentDisplayName : result.match.opponentDisplayName;
+                Timing.Found(name, Now); cancelRequested = false;
+                if (phase != Phase.Transitioning) phase = Phase.Found;
+            }
+            else if (!Timing.HasOpponent) phase = Phase.Waiting;
+        }
+        private static void StartFreshTicket()
+        {
+            // The gateway releases a missing assignment before returning 404.
+            // Keep the selected category, but never reuse its old local deadline.
+            ticketId = message = ""; ticket = null; assignment = null;
+            cancelRequested = quitRequested = false; phase = Phase.Waiting;
+            Timing.Start(Now); nextPoll = Now;
+        }
+        private static void Reset()
         {
             lock (Sync)
             {
-                Interlocked.Increment(ref requestVersion);
-                _state = MatchmakingUiState.Idle;
-                _queuedMode = string.Empty;
-                _ticketId = string.Empty;
-                _message = string.Empty;
-                _requestInFlight = false;
-                _pendingTicket = null;
-                _currentTicket = null;
-                _pendingError = string.Empty;
-                _hasPendingResponse = false;
-                _nextPollAt = 0f;
-                _launchTriggered = false;
-            
+                version++; phase = Phase.Idle; inFlight = hasPending = cancelRequested = quitRequested = false;
+                ticketId = mode = message = ""; ticket = null; assignment = null;
+                pendingTicket = null; pendingAssignment = null; pendingError = "";
             }
-        }
-
-        private static void SetErrorState(string message)
-        {
-            _state = MatchmakingUiState.Error;
-            _message = string.IsNullOrEmpty(message) ? "Matchmaking failed." : message;
-            _requestInFlight = false;
-            _nextPollAt = 0f;
-        }
-
-        private enum BackgroundOperation
-        {
-            Enqueue,
-            Poll,
-            Cancel
+            if (backgroundOverride) { Application.runInBackground = previousBackground; backgroundOverride = false; }
         }
     }
 }

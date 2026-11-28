@@ -54,6 +54,7 @@ namespace ItsFrosti.SpeedrunningMod
         private static bool _requestInFlight;
         private static bool _hasPendingResponse;
         private static string _pendingError = string.Empty;
+        private static long _pendingHttpStatus;
         private static ModMatchStateDto _pendingState;
         private static ModMatchStateDto _currentState;
         private static float _nextPollAt;
@@ -79,7 +80,6 @@ namespace ItsFrosti.SpeedrunningMod
             }
 
             _context = context;
-            ModClientIdentityStore.Initialize(context);
             _installed = true;
             Plugin.Logger.Info("Private race room runtime installed.");
         }
@@ -261,9 +261,9 @@ namespace ItsFrosti.SpeedrunningMod
                 return;
             }
 
-            if (!PluginSettings.EnableNetworking || !Plugin.Server.IsConfigured)
+            if (!Plugin.Server.IsConfigured)
             {
-                SetErrorState("Enable the server connection in Options > Speedrunning.");
+                SetErrorState("The race service is unavailable. Please retry.");
                 return;
             }
 
@@ -296,9 +296,9 @@ namespace ItsFrosti.SpeedrunningMod
                 return;
             }
 
-            if (!PluginSettings.EnableNetworking || !Plugin.Server.IsConfigured)
+            if (!Plugin.Server.IsConfigured)
             {
-                SetErrorState("Enable the server connection in Options > Speedrunning.");
+                SetErrorState("The race service is unavailable. Please retry.");
                 return;
             }
 
@@ -609,11 +609,14 @@ namespace ItsFrosti.SpeedrunningMod
             ModMatchStateDto state;
             string pendingError;
             PendingServerOperation completedOperation;
+            long httpStatus;
             lock (Sync)
             {
                 state = _pendingState;
                 pendingError = _pendingError;
                 completedOperation = _pendingServerOperation;
+                httpStatus = _pendingHttpStatus;
+                _pendingHttpStatus = 0;
                 _pendingState = null;
                 _pendingError = string.Empty;
                 _pendingServerOperation = PendingServerOperation.None;
@@ -623,6 +626,14 @@ namespace ItsFrosti.SpeedrunningMod
 
             if (!string.IsNullOrEmpty(pendingError))
             {
+                if (completedOperation == PendingServerOperation.PollRoom && httpStatus == 404)
+                {
+                    ResetForMainMenu();
+                    ModClientSessionMode.SelectVanilla();
+                    if (uGUI_MainMenu.main != null) uGUI_MainMenu.main.OnHome();
+                    ErrorMessage.AddMessage("The host closed the private room.");
+                    return;
+                }
                 SetErrorState(pendingError);
                 return;
             }
@@ -671,6 +682,7 @@ namespace ItsFrosti.SpeedrunningMod
                 if (Plugin.IsShuttingDown || version != requestVersion) return;
                 ModMatchStateDto state = null;
                 string error = string.Empty;
+                long httpStatus = 0;
 
                 try
                 {
@@ -700,6 +712,7 @@ namespace ItsFrosti.SpeedrunningMod
                 {
                     if (Plugin.IsShuttingDown) return;
                     error = ex.Message;
+                    var http = ex as NativeHttpFailure; if (http != null) httpStatus = http.StatusCode;
                     Plugin.Logger.Warning("Private race room request failed: " + ex.Message);
                 }
 
@@ -708,6 +721,7 @@ namespace ItsFrosti.SpeedrunningMod
                     if (Plugin.IsShuttingDown || version != requestVersion) return;
                     _pendingState = state;
                     _pendingError = error;
+                    _pendingHttpStatus = httpStatus;
                     _pendingServerOperation = operation;
                     _hasPendingResponse = true;
                 }
@@ -737,7 +751,14 @@ namespace ItsFrosti.SpeedrunningMod
             BeginBackgroundRequest(PendingServerOperation.StartRoom, roomCode, startRequest);
         }
 
-        private static void BeginLocalRaceLaunchFromCurrentState()
+        internal static void BeginQueuedRace(ModMatchStateDto assignment)
+        {
+            ResetForMainMenu();
+            _currentState = assignment;
+            BeginLocalRaceLaunchFromCurrentState(true);
+        }
+
+        private static void BeginLocalRaceLaunchFromCurrentState(bool queued = false)
         {
             if (_currentState == null)
             {
@@ -789,6 +810,7 @@ namespace ItsFrosti.SpeedrunningMod
                 _lastPreparedSeedId,
                 _lastPreparedSeedValue);
             ModClientSessionMode.AttachPrivateRaceLocalRoom(GetLocalPlayerDisplayText(), IsLocalHost);
+            ModClientSessionMode.SetRandomQueueRace(queued);
 
             uGUI_MainMenu menu = uGUI_MainMenu.main;
             if (menu == null)
@@ -937,10 +959,9 @@ namespace ItsFrosti.SpeedrunningMod
                 return;
             }
 
-            int version = requestVersion;
             ThreadPool.QueueUserWorkItem(delegate
             {
-                if (Plugin.IsShuttingDown || version != requestVersion) return;
+                if (Plugin.IsShuttingDown) return;
                 try
                 {
                     Plugin.Server.LeavePrivateRace(roomCode, playerId);
@@ -1022,7 +1043,7 @@ namespace ItsFrosti.SpeedrunningMod
 
         private static void MarkReturnedToRoom()
         {
-            if (_context == null || !PluginSettings.EnableNetworking || !Plugin.Server.IsConfigured)
+            if (_context == null || !Plugin.Server.IsConfigured)
             {
                 return;
             }

@@ -8,11 +8,17 @@ namespace ItsFrosti.SpeedrunningMod
 {
     // Server workers wait here; Unity's own HTTP transport runs on the main
     // thread. No external bridge or process-wide TLS overrides are needed.
+    internal sealed class NativeHttpFailure : InvalidOperationException
+    {
+        internal readonly long StatusCode;
+        internal NativeHttpFailure(long code, string message) : base(message) { StatusCode = code; }
+    }
+
     internal static class NativeHttp
     {
         private sealed class Pending
         {
-            internal string Url, Method, Body, Response;
+            internal string Url, Method, Body, Response, Bearer;
             internal Exception Error;
             internal UnityWebRequest Request;
             internal readonly ManualResetEvent Done = new ManualResetEvent(false);
@@ -28,9 +34,9 @@ namespace ItsFrosti.SpeedrunningMod
             lock (Sync) { stopped = false; }
         }
 
-        internal static string Send(string url, string method, string body)
+        internal static string Send(string url, string method, string body, string bearer = null)
         {
-            var pending = new Pending { Url = url, Method = method, Body = body };
+            var pending = new Pending { Url = url, Method = method, Body = body, Bearer = bearer };
             lock (Sync)
             {
                 if (stopped)
@@ -60,6 +66,7 @@ namespace ItsFrosti.SpeedrunningMod
                         request.downloadHandler = new DownloadHandlerBuffer();
                         request.timeout = 75;
                         request.SetRequestHeader("Accept", "application/json");
+                        if (!string.IsNullOrEmpty(pending.Bearer)) request.SetRequestHeader("Authorization", "Bearer " + pending.Bearer);
                         if (pending.Body != null)
                         {
                             request.uploadHandler = new UploadHandlerRaw(Encoding.UTF8.GetBytes(pending.Body));
@@ -76,8 +83,7 @@ namespace ItsFrosti.SpeedrunningMod
                     if (!pending.Request.isDone) continue;
                     pending.Response = pending.Request.downloadHandler.text;
                     var error = pending.Request.isError || pending.Request.responseCode >= 400
-                        ? new InvalidOperationException("Server request failed (" + pending.Request.responseCode + "): " +
-                            (string.IsNullOrEmpty(pending.Response) ? pending.Request.error : pending.Response)) : null;
+                        ? new NativeHttpFailure(pending.Request.responseCode, "Server request failed (" + pending.Request.responseCode + ").") : null;
                     Active.RemoveAt(i);
                     Complete(pending, error);
                 }

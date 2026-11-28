@@ -10,12 +10,9 @@ namespace ItsFrosti.SpeedrunningMod
 
     internal static class ModClientIdentityStore
     {
-        private static ModClientIdentity identity;
-        internal static void Initialize(PluginContext context)
+        internal static ModClientIdentity GetIdentity()
         {
-            if (identity != null) return;
-            identity = new ModClientIdentity { PlayerId = PluginSettings.PlayerId, DisplayName = PluginSettings.DisplayName };
+            return new ModClientIdentity { PlayerId = RaceAccount.PlayerId, DisplayName = RaceAccount.DisplayName };
         }
-        internal static ModClientIdentity GetIdentity() { return identity; }
     }
 }

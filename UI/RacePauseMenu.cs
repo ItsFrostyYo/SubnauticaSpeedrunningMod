@@ -16,8 +16,7 @@ namespace ItsFrosti.SpeedrunningMod.Ui
         private const string SaveDisabledLabel = "Save Disabled";
         private const string ForfeitLabel = "Forfeit";
         private const string ForfeitConfirmationLabel = "Forfeit this race?";
-        private const string ReturnToRoomLabel = "Leave";
-        private const string ReturnToRoomConfirmationLabel = "Return to the private race room?";
+        private static string ReturnConfirmation { get { return ModClientSessionMode.IsRandomQueueRace ? "Return to Main Menu?" : "Return to the private race room?"; } }
         private static float _lastSaveBlockedMessageAt = -1000f;
 
         [HarmonyPostfix, HarmonyPatch("Update")]
@@ -159,16 +158,16 @@ namespace ItsFrosti.SpeedrunningMod.Ui
 
             if (menu.quitToMainMenuText != null)
             {
-                menu.quitToMainMenuText.text = ReturnToRoomLabel;
+                menu.quitToMainMenuText.text = ModClientSessionMode.IsRandomQueueRace ? "Return to Main Menu" : "Return to Private Race Room";
             }
 
             if (menu.quitLastSaveText != null)
             {
-                menu.quitLastSaveText.text = ReturnToRoomConfirmationLabel;
+                menu.quitLastSaveText.text = ReturnConfirmation;
             }
 
-            ApplyConfirmationText(menu.transform.Find("QuitConfirmation"), ReturnToRoomConfirmationLabel);
-            ApplyConfirmationText(menu.transform.Find("QuitConfirmationWithSaveWarning"), ReturnToRoomConfirmationLabel);
+            ApplyConfirmationText(menu.transform.Find("QuitConfirmation"), ReturnConfirmation);
+            ApplyConfirmationText(menu.transform.Find("QuitConfirmationWithSaveWarning"), ReturnConfirmation);
         }
 
         private static void ApplyConfirmationText(Transform screenTransform, string replacementText)
@@ -216,11 +215,6 @@ namespace ItsFrosti.SpeedrunningMod.Ui
 
         private static bool ShouldUseForfeitMenuState()
         {
-            if (ModSeedRuntimeHost.IsRankedSingleplayerSeedActive())
-            {
-                return true;
-            }
-
             return ModSeedRuntimeHost.IsRankedMultiplayerSeedActive() &&
                    ModPrivateRaceCountdownRuntimeHost.ShouldUseForfeitMenu;
         }

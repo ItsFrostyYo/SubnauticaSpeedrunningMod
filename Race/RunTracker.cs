@@ -50,6 +50,7 @@ namespace ItsFrosti.SpeedrunningMod.RunTracking
         private static bool _timerArmed;
         private static bool _timerRunning;
         private static bool _timerCompleted;
+        internal static bool HasLaunchedRocket { get; private set; }
         private static double _elapsedSeconds;
         private static double _realTimeElapsedSeconds;
         private static ModGameplaySnapshot _lastSnapshot;
@@ -103,6 +104,7 @@ namespace ItsFrosti.SpeedrunningMod.RunTracking
 
             if (string.Equals(scene.name, "XMenu", StringComparison.Ordinal))
             {
+                FreecamSession.RestoreNormalTime();
                 if (ModClientSessionMode.IsRankedMultiplayerSelected && !_timerCompleted)
                 {
                     ModPrivateRaceCountdownRuntimeHost.NotifyForfeitIfNeeded();
@@ -111,7 +113,8 @@ namespace ItsFrosti.SpeedrunningMod.RunTracking
                 ResetTimerSession();
                 ModOverlayRuntime.Clear();
                 Ruleset8RaceSession.Reset();
-                ModPrivateRaceRoomRuntimeHost.ReturnToRoomAfterGameplay();
+                if (ModClientSessionMode.IsRandomQueueRace) ModPrivateRaceRoomRuntimeHost.ResetForMainMenu();
+                else ModPrivateRaceRoomRuntimeHost.ReturnToRoomAfterGameplay();
                 ModClientSessionMode.ResetForMainMenu();
             }
         }
@@ -210,6 +213,7 @@ namespace ItsFrosti.SpeedrunningMod.RunTracking
             {
                 ResetClock();
                 _timerRunning = _timerCompleted = _timerArmed = false;
+                HasLaunchedRocket = false;
                 _portalLoading = false;
             }
 
@@ -356,12 +360,12 @@ namespace ItsFrosti.SpeedrunningMod.RunTracking
             }
 
             if (ModClientSessionMode.IsRankedMultiplayerSelected &&
-                ModPrivateRaceCountdownRuntimeHost.DidLocalPlayerLoseRace &&
+                ModPrivateRaceCountdownRuntimeHost.IsMatchCompleted &&
                 !_timerCompleted)
             {
                 _timerCompleted = true;
                 StopTimer();
-                Plugin.Logger.Info("Speedrun timer completed because the opponent won the private race at " + FormatTimer(_elapsedSeconds) + ".");
+                Plugin.Logger.Info("Speedrun timer stopped at race completion: " + FormatTimer(_elapsedSeconds) + ".");
             }
 
             ReadClock();
@@ -449,6 +453,7 @@ namespace ItsFrosti.SpeedrunningMod.RunTracking
 
         internal static void OnRocketLaunchStarted()
         {
+            if (LaunchRocket.isLaunching) HasLaunchedRocket = true;
             // Called immediately after the successful interaction sets isLaunching,
             // before time-capsule submission or the end cinematic can delay the HUD.
             if (!_installed || !IsTimerRunning || !LaunchRocket.isLaunching) return;
@@ -839,7 +844,7 @@ namespace ItsFrosti.SpeedrunningMod.RunTracking
         {
             string modeLabel = GetRunModeLabel();
             string prefix = ModClientSessionMode.IsRankedMultiplayerSelected
-                ? "In Race"
+                ? (ModClientSessionMode.IsRandomQueueRace ? "In Race" : "In Private Race")
                 : "In Singleplayer Run";
             return string.IsNullOrEmpty(modeLabel)
                 ? prefix
@@ -1121,6 +1126,7 @@ namespace ItsFrosti.SpeedrunningMod.RunTracking
             _timerArmed = false;
             _timerRunning = false;
             _timerCompleted = false;
+            HasLaunchedRocket = false;
             ResetClock();
             _lastCureStartTime = 0f;
             _currentSaveSlot = string.Empty;

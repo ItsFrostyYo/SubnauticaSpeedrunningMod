@@ -30,7 +30,7 @@ namespace ItsFrosti.SpeedrunningMod
     {
         public const string PluginId = "ItsFrosti.SpeedrunningMod";
         public const string PluginName = "Race & BetterRNG";
-        public const string PluginVersion = "1.1.1";
+        public const string PluginVersion = "1.2.0";
         public const bool AutomaticUpdateEnabled = true;
         public const string UpdateRepository = "ItsFrostyYo/SubnauticaSpeedrunningMod";
         public const string UpdateManifestUrl = "https://raw.githubusercontent.com/" + UpdateRepository + "/main/dist/mod-update.xml";
@@ -49,8 +49,9 @@ namespace ItsFrosti.SpeedrunningMod
             IsShuttingDown = false;
             NativeHttp.Initialize();
             Harmony = context.Harmony;
-            PluginSettings.Initialize(context.Settings);
-            Server = new ModServerApiClient(PluginSettings.ServerUrl);
+            RaceService.Initialize(context);
+            RaceAccount.Initialize(context);
+            Server = new ModServerApiClient(RaceService.ApiUrl);
             host = new GameObject(PluginId);
             UnityEngine.Object.DontDestroyOnLoad(host);
             // SceneCleaner removes even DontDestroyOnLoad roots on return to menu.
@@ -73,6 +74,8 @@ namespace ItsFrosti.SpeedrunningMod
             // Cancel transport before resetting state. Workers are background threads;
             // quitting never waits for HTTP responses or attempts another request.
             Cleanup(NativeHttp.Shutdown);
+            Cleanup(FreecamSession.RestoreNormalTime);
+            Cleanup(RaceAccount.Shutdown);
             Cleanup(ModRankedMatchmakingRuntimeHost.Shutdown);
             Cleanup(ModPrivateRaceRoomRuntimeHost.Shutdown);
             Cleanup(ModPrivateRaceCountdownRuntimeHost.Shutdown);
@@ -117,11 +120,13 @@ namespace ItsFrosti.SpeedrunningMod
     internal sealed class PluginRuntime : MonoBehaviour
     {
         private void OnApplicationQuit() { Plugin.Shutdown(); }
+        private void LateUpdate() { if (!Plugin.IsShuttingDown) FreecamSession.LateUpdate(); }
 
         private void Update()
         {
             if (Plugin.IsShuttingDown) return;
             NativeHttp.Update();
+            RaceAccount.Update();
             ModRankedMatchmakingRuntimeHost.Update();
             ModPrivateRaceRoomRuntimeHost.Update();
             SingleplayerRunRuntimeHost.Update();
