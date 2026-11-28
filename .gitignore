@@ -8,3 +8,6 @@ bin/
 !.vscode/tasks.json
 Other/
 Race/Timing/README.md
+
+# Server is an independent Git repository.
+/Server/
