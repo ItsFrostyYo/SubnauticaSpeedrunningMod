@@ -11,7 +11,7 @@ namespace ItsFrosti.SpeedrunningMod.Ui
     {
         private const string LeaderboardHomeGroupName = "ModLeaderboardHome";
         private const string UpdatePanelBodyObjectName = "ModUpdatePanelBody";
-        private const string UpdatePanelBodyText = "Updated UI and Improved In-Game Timer.";
+        private const string UpdatePanelBodyText = "Updated the In-Game Timer for Consistency and Accuracy, Load Removal only removes actually loading time, and accounts for PDA Open in Portal.";
         private const int UpdatePanelBodyFontSize = 14;
 
         private static void EnsureLeaderboardHomeGroup(MainMenuRightSide rightSide)

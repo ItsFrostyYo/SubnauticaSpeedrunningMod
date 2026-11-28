@@ -19,11 +19,13 @@ namespace ItsFrosti.SpeedrunningMod.RunTracking
             this.timestamp = timestamp;
             this.frequency = frequency;
         }
-        internal void Start()
+        internal long CaptureTimestamp() { return timestamp(); }
+        internal void Start() { StartAt(timestamp()); }
+        internal void StartAt(long startTimestamp)
         {
             if (Running) return;
             Reset();
-            started = stopped = timestamp();
+            started = stopped = startTimestamp;
             Running = true;
         }
         internal void SetRemoving(bool value)

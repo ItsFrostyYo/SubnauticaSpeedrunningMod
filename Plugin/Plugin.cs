@@ -30,7 +30,7 @@ namespace ItsFrosti.SpeedrunningMod
     {
         public const string PluginId = "ItsFrosti.SpeedrunningMod";
         public const string PluginName = "Race & BetterRNG";
-        public const string PluginVersion = "1.1.0";
+        public const string PluginVersion = "1.1.1";
         public const bool AutomaticUpdateEnabled = true;
         public const string UpdateRepository = "ItsFrostyYo/SubnauticaSpeedrunningMod";
         public const string UpdateManifestUrl = "https://raw.githubusercontent.com/" + UpdateRepository + "/main/dist/mod-update.xml";

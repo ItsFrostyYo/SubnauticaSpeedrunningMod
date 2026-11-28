@@ -30,7 +30,8 @@ namespace ItsFrosti.SpeedrunningMod.RunTracking
         internal static bool IsTimerRunning { get { return _timerRunning && !_timerCompleted; } }
         internal static void SetPortalLoadRemoval(bool removing) { Clock.SetRemoving(removing && IsTimerRunning); }
         private static void ReadClock() { Clock.Read(out _elapsedSeconds, out _realTimeElapsedSeconds); }
-        private static void StartTimer() { Clock.Start(); _timerRunning = true; ReadClock(); }
+        private static void StartTimer() { StartTimer(Clock.CaptureTimestamp()); }
+        private static void StartTimer(long timestamp) { Clock.StartAt(timestamp); _timerRunning = true; ReadClock(); }
         private static void StopTimer() { Clock.Stop(); _timerRunning = false; ReadClock(); }
         private static void ResetClock()
         {
@@ -49,7 +50,6 @@ namespace ItsFrosti.SpeedrunningMod.RunTracking
         private static bool _timerArmed;
         private static bool _timerRunning;
         private static bool _timerCompleted;
-        private static bool _lastLaunchStarted;
         private static double _elapsedSeconds;
         private static double _realTimeElapsedSeconds;
         private static ModGameplaySnapshot _lastSnapshot;
@@ -60,7 +60,6 @@ namespace ItsFrosti.SpeedrunningMod.RunTracking
         private static ModSingleplayerRunMode _activeRunMode = ModSingleplayerRunMode.None;
         private static int _runProgressIndex;
         private static string _runProgressSubtitle = "Run has Not Started";
-        private static bool _survivalIntroObserved;
         private static bool _lastSeaglideUnlocked;
         private static bool _lastIonBatteryUnlocked;
         private static TechType _lastStartedCraftTechType = TechType.None;
@@ -210,7 +209,7 @@ namespace ItsFrosti.SpeedrunningMod.RunTracking
             if (!string.Equals(_currentSaveSlot, saveSlot, StringComparison.Ordinal))
             {
                 ResetClock();
-                _timerRunning = _timerCompleted = _timerArmed = _survivalIntroObserved = false;
+                _timerRunning = _timerCompleted = _timerArmed = false;
                 _portalLoading = false;
             }
 
@@ -356,7 +355,6 @@ namespace ItsFrosti.SpeedrunningMod.RunTracking
                 _activeRunMode = ModSingleplayerRunMode.None;
             }
 
-            bool betterRngTimedRun = IsBetterRngTimedRunActive();
             if (ModClientSessionMode.IsRankedMultiplayerSelected &&
                 ModPrivateRaceCountdownRuntimeHost.DidLocalPlayerLoseRace &&
                 !_timerCompleted)
@@ -367,20 +365,6 @@ namespace ItsFrosti.SpeedrunningMod.RunTracking
             }
 
             ReadClock();
-
-            if (LaunchRocket.isLaunching && !_lastLaunchStarted && _timerRunning && !_timerCompleted)
-            {
-                _timerCompleted = true;
-                StopTimer();
-                Plugin.Logger.Info("Speedrun timer completed on rocket launch at " + FormatTimer(_elapsedSeconds) + ".");
-
-                if (betterRngTimedRun)
-                {
-                    ShowBetterRngVerification();
-                }
-            }
-
-            _lastLaunchStarted = LaunchRocket.isLaunching;
 
             if (_timerCompleted)
             {
@@ -394,7 +378,7 @@ namespace ItsFrosti.SpeedrunningMod.RunTracking
                     break;
                 case ModSingleplayerRunMode.Survival:
                 case ModSingleplayerRunMode.Hardcore:
-                    UpdateSurvivalTimerLifecycle();
+                    // Started by the native intro clock-resume hook, never by a later HUD update.
                     break;
                 default:
                     if (!_timerRunning)
@@ -440,42 +424,40 @@ namespace ItsFrosti.SpeedrunningMod.RunTracking
             }
         }
 
-        private static void UpdateSurvivalTimerLifecycle()
+        internal static void OnIntroGameTimeResumed()
         {
-            if (!ShouldArmSurvivalNewGameTimer())
-            {
-                if (!_timerRunning)
-                {
-                    _timerArmed = false;
-                    _survivalIntroObserved = false;
-                    ResetClock();
-                }
-
+            long timestamp = Clock.CaptureTimestamp();
+            if (!_installed || Player.main == null || DayNightCycle.main == null || DayNightCycle.main.dayNightSpeed <= 0f ||
+                uGUI.main == null || uGUI.main.intro == null || !uGUI.main.intro.showing)
                 return;
-            }
 
-            if (!_timerArmed)
-            {
-                _timerArmed = true;
-                Plugin.Logger.Info("Speedrun timer armed for fresh " + _activeRunMode + " singleplayer start.");
-            }
+            // The native callback can precede this host's first update for the new save.
+            UpdateSaveContext();
+            ModSingleplayerRunMode mode = RunTimingEligibility.Resolve(Utils.GetLegacyGameMode(),
+                ModSeedRuntimeHost.IsRankedSingleplayerSeedActive() || ModSeedRuntimeHost.IsRankedMultiplayerSeedActive(),
+                ModClientSessionMode.IsBetterRngSingleplayerSelected, Utils.GetContinueMode());
+            if (_timerRunning || _timerCompleted ||
+                (mode != ModSingleplayerRunMode.Survival && mode != ModSingleplayerRunMode.Hardcore))
+                return;
 
-            if (IntroVignette.isIntroActive || (Player.main != null && Player.main.cinematicModeActive))
-            {
-                _survivalIntroObserved = true;
-            }
+            _activeRunMode = mode;
+            _timerArmed = true;
+            _verificationVisible = false;
+            StartTimer(timestamp);
+            Plugin.Logger.Info("Speedrun timer started when the intro resumed game time.");
+        }
 
-            if (_timerArmed &&
-                !_timerRunning &&
-                _survivalIntroObserved &&
-                !IntroVignette.isIntroActive &&
-                Player.main != null &&
-                !Player.main.cinematicModeActive)
-            {
-                StartTimer();
-                _verificationVisible = false;
-                Plugin.Logger.Info("Speedrun timer started due to intro cutscene ending and player control being restored.");
-            }
+        internal static void OnRocketLaunchStarted()
+        {
+            // Called immediately after the successful interaction sets isLaunching,
+            // before time-capsule submission or the end cinematic can delay the HUD.
+            if (!_installed || !IsTimerRunning || !LaunchRocket.isLaunching) return;
+            Clock.Stop();
+            _timerRunning = false;
+            _timerCompleted = true;
+            ReadClock();
+            Plugin.Logger.Info("Speedrun timer completed on rocket launch at " + FormatTimer(_elapsedSeconds) + ".");
+            if (IsBetterRngTimedRunActive()) ShowBetterRngVerification();
         }
 
         private static void ShowBetterRngVerification()
@@ -516,67 +498,28 @@ namespace ItsFrosti.SpeedrunningMod.RunTracking
             return Player.main.currentEscapePod != null;
         }
 
-        private static bool ShouldArmSurvivalNewGameTimer()
-        {
-            if (Player.main == null)
-            {
-                return false;
-            }
-
-            if (Utils.GetContinueMode())
-            {
-                return false;
-            }
-
-            GameMode mode = Utils.GetLegacyGameMode();
-            if (mode != GameMode.Survival && mode != GameMode.Hardcore)
-            {
-                return false;
-            }
-
-            if (_state != ModGameStateKind.InGame)
-            {
-                return false;
-            }
-
-            return Player.main.currentEscapePod != null;
-        }
+        private static readonly KeyCode[] CreativeStartKeys = (KeyCode[])Enum.GetValues(typeof(KeyCode));
+        private static int _pauseMenuInputFrame = -1;
+        internal static void SuppressPauseMenuInput() { _pauseMenuInputFrame = Time.frameCount; }
 
         private static bool TryGetCreativeTimerStartReason(out string reason)
         {
             reason = null;
-            if (Player.main == null)
-            {
+            if (Player.main == null || _pauseMenuInputFrame == Time.frameCount || Time.timeScale <= 0f ||
+                (IngameMenu.main != null && IngameMenu.main.gameObject.activeInHierarchy) ||
+                Input.GetKeyDown(KeyCode.Escape) || GameInput.GetButtonDown(GameInput.Button.UIMenu))
                 return false;
-            }
 
-            Vector3 moveDirection = GameInput.GetMoveDirection();
-            if (Mathf.Abs(moveDirection.x) > 0.01f || Mathf.Abs(moveDirection.y) > 0.01f || Mathf.Abs(moveDirection.z) > 0.01f)
+            // Raw button presses include unbound keyboard keys and clicks in empty space.
+            // Mouse motion/axes and held keys do not constitute a new button press.
+            if (!Input.anyKeyDown) return false;
+            foreach (KeyCode key in CreativeStartKeys)
             {
-                reason = "movement input";
+                if (key == KeyCode.None || key == KeyCode.Escape || key >= KeyCode.JoystickButton0) continue;
+                if (!Input.GetKeyDown(key)) continue;
+                reason = "button press (" + key + ")";
                 return true;
             }
-
-            if (GameInput.GetButtonDown(GameInput.Button.Jump))
-            {
-                reason = "jump input";
-                return true;
-            }
-
-            if (GameInput.GetButtonDown(GameInput.Button.PDA))
-            {
-                reason = "PDA button press";
-                return true;
-            }
-
-            GUIHand hand = Player.main.GetComponent<GUIHand>();
-            GameObject activeTarget = hand != null ? hand.GetActiveTarget() : null;
-            if (activeTarget != null && GameInput.GetButtonDown(GameInput.Button.LeftHand))
-            {
-                reason = "interaction with " + activeTarget.name;
-                return true;
-            }
-
             return false;
         }
 
@@ -1174,10 +1117,10 @@ namespace ItsFrosti.SpeedrunningMod.RunTracking
             _lastAliveBiomeName = string.Empty;
             _lastAlivePosition = Vector3.zero;
             _hasLastAlivePosition = false;
+            _pauseMenuInputFrame = -1;
             _timerArmed = false;
             _timerRunning = false;
             _timerCompleted = false;
-            _lastLaunchStarted = false;
             ResetClock();
             _lastCureStartTime = 0f;
             _currentSaveSlot = string.Empty;
@@ -1185,7 +1128,6 @@ namespace ItsFrosti.SpeedrunningMod.RunTracking
             _activeRunMode = ModSingleplayerRunMode.None;
             _runProgressIndex = 0;
             _runProgressSubtitle = "Run has Not Started";
-            _survivalIntroObserved = false;
             _lastSeaglideUnlocked = false;
             _lastIonBatteryUnlocked = false;
             _lastStartedCraftTechType = TechType.None;
